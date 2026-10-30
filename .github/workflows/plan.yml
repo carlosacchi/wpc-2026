@@ -1,5 +1,5 @@
 name: Reviewed workload plan (no deployment)
-run-name: Plan ${{ inputs.team }} by @${{ github.actor }}
+run-name: Plan ${{ inputs.team }} / ${{ inputs.scenario }} by @${{ github.actor }}
 
 on:
   workflow_dispatch:
@@ -9,6 +9,12 @@ on:
         required: true
         type: choice
         options: [sales, operations]
+      scenario:
+        description: Baseline, or real rename/replacement preview (always rejected, never applied)
+        required: true
+        default: baseline
+        type: choice
+        options: [baseline, rename-demo]
 
 permissions:
   contents: read
@@ -38,6 +44,7 @@ jobs:
       TF_VAR_cost_center: ${{ inputs.team == 'sales' && 'WPC-SALES' || 'WPC-OPS' }}
       TF_VAR_owner: platform-team
       STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
+      SCENARIO: ${{ inputs.scenario }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -54,7 +61,17 @@ jobs:
           client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - run: |
+      - name: Select deliberate rename scenario (no source or state edits)
+        if: inputs.scenario == 'rename-demo'
+        run: |
+          candidate="${TF_VAR_storage_account_name}r"
+          if [[ ! "$candidate" =~ ^[a-z0-9]{3,24}$ ]]; then
+            echo "::error::Baseline storage name plus suffix r must be 3-24 lowercase alphanumeric characters."
+            exit 1
+          fi
+          echo "TF_VAR_storage_account_name=$candidate" >> "$GITHUB_ENV"
+      - name: Validate and create real saved plan (no apply)
+        run: |
           terraform -chdir=infra/workload init -lockfile=readonly \
             -backend-config="storage_account_name=$STATE_ACCOUNT" \
             -backend-config="container_name=tfstate" \
@@ -62,10 +79,21 @@ jobs:
             -backend-config="use_azuread_auth=true"
           terraform -chdir=infra/workload validate
           terraform -chdir=infra/workload plan -input=false -out=workload.tfplan
+      - name: Show actual Terraform impact
+        run: |
+          terraform -chdir=infra/workload show -no-color workload.tfplan
           terraform -chdir=infra/workload show -json workload.tfplan > infra/workload/plan.json
-          node scripts/check-plan.mjs infra/workload/plan.json "$TF_VAR_team"
+      - name: Enforce policy (rename-demo must fail here)
+        run: |
+          args=()
+          if [[ "$SCENARIO" == "rename-demo" ]]; then args+=(--expect-rename); fi
+          node scripts/check-plan.mjs infra/workload/plan.json "$TF_VAR_team" "${args[@]}"
+      - name: Bind permitted plan to exact run and target
+        if: inputs.scenario == 'baseline'
+        run: |
           node scripts/plan-artifact.mjs write infra/workload "$TF_VAR_team" "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.scenario == 'baseline'
         with:
           name: reviewed-plan-${{ inputs.team }}
           path: |

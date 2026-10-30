@@ -15,7 +15,30 @@ La sessione mette a fuoco un problema pratico: come far lavorare un agente AI su
 - [Pipeline](.github/workflows/): validazione senza credenziali sulle PR, solo plan manuale da `main`, ispezione dei subject OIDC senza login Azure.
 - [Verifica artefatto](scripts/plan-artifact.mjs): checksum, commit, run, tentativo, team e destinazione prima dell'apply manuale dell'operatore.
 
-Codice e workflow sono pubblicati. La [prima esecuzione CI](https://github.com/carlosacchi/wpc-2026/actions/runs/41131228129) ha superato test Node, Terraform mock, gate sui piani e compilazione Bicep. Anche la [diagnostica OIDC](https://github.com/carlosacchi/wpc-2026/actions/runs/41131232709) è riuscita. Non sono ancora una prova Azure end-to-end: nessuna risorsa è stata creata.
+Codice e workflow sono pubblicati. La [prima esecuzione CI](https://github.com/carlosacchi/wpc-2026/actions/runs/41131228129) ha superato test Node, Terraform mock, gate sui piani e compilazione Bicep. Anche la [diagnostica OIDC](https://github.com/carlosacchi/wpc-2026/actions/runs/41131232709) è riuscita. Il bootstrap Azure è stato applicato dopo approvazione: 9 risorse, poi piano senza modifiche; backend, federazione e policy riletti da Azure. Il workload e la sequenza replacement restano da verificare end-to-end.
+
+## Demo: una rinomina che implica una distruzione
+
+Non mostriamo un `destroy` eseguito: rinominiamo il parametro di uno Storage sandbox esistente e lasciamo che Terraform ne calcoli l'impatto.
+
+1. **Preparazione:** configurare le variabili GitHub e lanciare il piano baseline Sales. Dopo review, l'operatore crea lo Storage applicando esattamente quell'artefatto su una postazione isolata.
+2. **Baseline:** ripetere il piano, che deve risultare senza cambiamenti.
+3. **Errore plausibile:** lanciare `rename-demo`. Il workflow aggiunge `r` al nome richiesto, senza modificare state o codice e senza cambiare gli altri parametri.
+4. **Impatto:** `terraform validate` passa; il piano mostra il nome che forza replacement, `-/+` e una creazione/cancellazione. Un piano riuscito non significa cambiamento autorizzato.
+5. **Blocco:** lo step `Enforce policy` mostra `IMPACT`, `OBSERVED` e `DENY`, termina con errore. Nessun artefatto applicabile viene pubblicato per `rename-demo`; non esiste alcun job apply.
+6. **Correzione:** rilanciare `baseline`: nome originale, zero modifiche, gate verde; controllare che ID e configurazione Azure siano invariati.
+
+```sh
+gh workflow run plan.yml --repo carlosacchi/wpc-2026 --ref main \
+  -f team=sales -f scenario=baseline
+# Solo dopo creazione e verifica dello Storage iniziale:
+gh workflow run plan.yml --repo carlosacchi/wpc-2026 --ref main \
+  -f team=sales -f scenario=rename-demo
+```
+
+Il primo comando produce soltanto un piano: non crea il workload. La demo negativa deve fallire per **replacement osservato**, non per credenziali mancanti o un generico errore. Se lo Storage iniziale manca, il controllo `--expect-rename` restituisce un errore esplicito, non spaccia una creazione per una sostituzione. Le fixture dei test restano sintetiche.
+
+Questa variante riproducibile non richiede Copilot: in sessione si può chiedere la stessa rinomina all'agente e ispezionare il diff. Il controllo non dipende da chi scrive il cambiamento. Il gate rifiuta il replacement: **non** offre un bottone per approvarlo comunque. Un piano consentito passa invece alla review/apply manuale descritta sotto; nessun environment GitHub attende un'approvazione umana.
 
 ## Verifica locale
 
