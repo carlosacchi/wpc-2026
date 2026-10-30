@@ -16,6 +16,17 @@ try {
     };
     const violations = checkPlan(plan, team);
     if (violations.length) throw new Error(`${run}: ${violations.join("; ")}`);
+    const config = JSON.parse(await readFile(`infra/workload/teams/${team}.tfvars.json`, "utf8"));
+    const after = plan.resource_changes[0].change.after;
+    for (const [property, value] of Object.entries({
+      name: config.storage_account_name,
+      costCenter: config.cost_center,
+      owner: config.owner,
+      serviceLabel: config.service_label
+    })) {
+      const actual = property === "name" ? after.name : after.tags?.[property];
+      if (actual !== value) throw new Error(`${run}: versioned configuration mismatch for ${property}.`);
+    }
     const negative = structuredClone(plan);
     negative.resource_changes[0].change.after.public_network_access = "Enabled";
     if (!checkPlan(negative, team).some(message => message.includes("public_network_access"))) {

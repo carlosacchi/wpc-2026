@@ -10,7 +10,7 @@ on:
         type: choice
         options: [sales, operations]
       scenario:
-        description: Baseline, or real rename/replacement preview (always rejected, never applied)
+        description: Versioned team configuration, or deterministic rename fallback (never applied)
         required: true
         default: baseline
         type: choice
@@ -40,9 +40,6 @@ jobs:
       ARM_USE_AZUREAD: 'true'
       TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       TF_VAR_team: ${{ inputs.team }}
-      TF_VAR_storage_account_name: ${{ inputs.team == 'sales' && vars.SALES_STORAGE_NAME || vars.OPERATIONS_STORAGE_NAME }}
-      TF_VAR_cost_center: ${{ inputs.team == 'sales' && 'WPC-SALES' || 'WPC-OPS' }}
-      TF_VAR_owner: platform-team
       STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
       SCENARIO: ${{ inputs.scenario }}
     steps:
@@ -61,15 +58,16 @@ jobs:
           client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Select deliberate rename scenario (no source or state edits)
+      - name: Select deliberate rename fallback (no source or state edits)
         if: inputs.scenario == 'rename-demo'
         run: |
-          candidate="${TF_VAR_storage_account_name}r"
+          original=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; console.log(JSON.parse(readFileSync(`infra/workload/teams/${process.env.TF_VAR_team}.tfvars.json`, "utf8")).storage_account_name);')
+          candidate="${original}r"
           if [[ ! "$candidate" =~ ^[a-z0-9]{3,24}$ ]]; then
             echo "::error::Baseline storage name plus suffix r must be 3-24 lowercase alphanumeric characters."
             exit 1
           fi
-          echo "TF_VAR_storage_account_name=$candidate" >> "$GITHUB_ENV"
+          echo "RENAME_STORAGE_NAME=$candidate" >> "$GITHUB_ENV"
       - name: Validate and create real saved plan (no apply)
         run: |
           terraform -chdir=infra/workload init -lockfile=readonly \
@@ -78,7 +76,10 @@ jobs:
             -backend-config="key=$TF_VAR_team.tfstate" \
             -backend-config="use_azuread_auth=true"
           terraform -chdir=infra/workload validate
-          terraform -chdir=infra/workload plan -input=false -out=workload.tfplan
+          args=()
+          if [[ "$SCENARIO" == "rename-demo" ]]; then args+=("-var=storage_account_name=$RENAME_STORAGE_NAME"); fi
+          terraform -chdir=infra/workload plan -input=false \
+            -var-file="teams/$TF_VAR_team.tfvars.json" "${args[@]}" -out=workload.tfplan
       - name: Show actual Terraform impact
         run: |
           terraform -chdir=infra/workload show -no-color workload.tfplan

@@ -13,6 +13,8 @@ param costCenter string
 @minLength(1)
 param owner string
 
+param serviceLabel string = ''
+
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
   location: 'italynorth'
@@ -28,13 +30,13 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     minimumTlsVersion: 'TLS1_2'
     defaultToOAuthAuthentication: true
   }
-  tags: {
+  tags: union({
     project: 'wpc-2026'
     environment: 'sandbox'
     tenant: team
     costCenter: costCenter
     owner: owner
-  }
+  }, empty(serviceLabel) ? {} : {serviceLabel: serviceLabel})
 }
 
 output storageAccountId string = storage.id

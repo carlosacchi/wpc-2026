@@ -34,6 +34,11 @@ variable "owner" {
   }
 }
 
+variable "service_label" {
+  type    = string
+  default = ""
+}
+
 module "storage" {
   source              = "../modules/workload-storage"
   name                = var.storage_account_name
@@ -42,6 +47,7 @@ module "storage" {
   team                = var.team
   cost_center         = var.cost_center
   owner               = var.owner
+  service_label       = var.service_label
 }
 
 output "storage_account_id" {
