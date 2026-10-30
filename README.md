@@ -23,22 +23,23 @@ Non mostriamo un `destroy` eseguito: rinominiamo il parametro di uno Storage san
 
 1. **Preparazione:** configurare le variabili GitHub e lanciare il piano baseline Sales. Dopo review, l'operatore crea lo Storage applicando esattamente quell'artefatto su una postazione isolata.
 2. **Baseline:** ripetere il piano, che deve risultare senza cambiamenti.
-3. **Errore plausibile:** lanciare `rename-demo`. Il workflow aggiunge `r` al nome richiesto, senza modificare state o codice e senza cambiare gli altri parametri.
+3. **Copilot e PR:** chiedere all'agente di modificare soltanto `storage_account_name` nel [file Sales versionato](infra/workload/teams/sales.tfvars.json), aggiungendo `r`, e di spiegare l'impatto senza apply. Leggere il diff, aprire PR, attendere la CI senza credenziali Azure. Se Copilot segnala subito il rischio, è un risultato positivo, non un errore da nascondere. Dopo review, unire solo per il preview sandbox: il workflow non può applicare.
 4. **Impatto:** `terraform validate` passa; il piano mostra il nome che forza replacement, `-/+` e una creazione/cancellazione. Un piano riuscito non significa cambiamento autorizzato.
-5. **Blocco:** lo step `Enforce policy` mostra `IMPACT`, `OBSERVED` e `DENY`, termina con errore. Nessun artefatto applicabile viene pubblicato per `rename-demo`; non esiste alcun job apply.
-6. **Correzione:** rilanciare `baseline`: nome originale, zero modifiche, gate verde; controllare che ID e configurazione Azure siano invariati.
+5. **Blocco:** lanciare `baseline` dal main aggiornato: legge la configurazione di quel commit, anche se pericolosa. `Enforce policy` mostra `DENY` e termina con errore; metadata e upload non vengono eseguiti. Non esiste un job apply né un pulsante per approvare comunque.
+6. **Correzione con Copilot:** ripristinare il nome fisico originale e usare `service_label` per la nuova classificazione, senza modificare gate, test, workflow o state. Il modulo traduce l'etichetta nel tag `serviceLabel` senza cambiare il nome Azure. Nuova PR, CI, merge, dispatch `baseline`: atteso solo update tag, zero distruzioni. Operatore isolato rivede e autorizza soltanto questo piano; verificare ID invariato e tag dopo apply.
 
 ```sh
 gh workflow run plan.yml --repo carlosacchi/wpc-2026 --ref main \
   -f team=sales -f scenario=baseline
-# Solo dopo creazione e verifica dello Storage iniziale:
+# Dopo ogni merge, baseline legge proprio il file versionato, non un valore GitHub.
+# Fallback deterministico SOLO con nome originale e Storage esistente:
 gh workflow run plan.yml --repo carlosacchi/wpc-2026 --ref main \
   -f team=sales -f scenario=rename-demo
 ```
 
-Il primo comando produce soltanto un piano: non crea il workload. La demo negativa deve fallire per **replacement osservato**, non per credenziali mancanti o un generico errore. Se lo Storage iniziale manca, il controllo `--expect-rename` restituisce un errore esplicito, non spaccia una creazione per una sostituzione. Le fixture dei test restano sintetiche.
+Il primo comando produce soltanto un piano: non crea il workload. La demo negativa deve fallire per **replacement osservato**, non per credenziali mancanti o un generico errore. Se lo Storage iniziale manca, il controllo `--expect-rename` restituisce un errore esplicito, non spaccia una creazione per una sostituzione. Le fixture dei test restano sintetiche. Anche il [confronto Bicep](infra/compare/storage.bicep) supporta il parametro opzionale `serviceLabel` come tag, non come rinomina fisica: non applicare entrambi i motori alla stessa risorsa e non usare il gate JSON Terraform sull'output ARM What-If.
 
-Questa variante riproducibile non richiede Copilot: in sessione si può chiedere la stessa rinomina all'agente e ispezionare il diff. Il controllo non dipende da chi scrive il cambiamento. Il gate rifiuta il replacement: **non** offre un bottone per approvarlo comunque. Un piano consentito passa invece alla review/apply manuale descritta sotto; nessun environment GitHub attende un'approvazione umana.
+`rename-demo` resta il fallback ripetibile: legge lo stesso file, poi aggiunge `r` con un override esplicito, stampa `IMPACT`/`OBSERVED` e rifiuta il replacement. Non presentarlo come diff prodotto da Copilot. La storia principale usa invece PR e configurazione versionata con scenario `baseline`. Il controllo non dipende da chi scrive il cambiamento. Un piano consentito passa alla review/apply manuale descritta sotto; nessun environment GitHub attende un'approvazione umana. Un altro terminale della stessa postazione non isola l'agente dalle credenziali.
 
 ## Verifica locale
 
@@ -62,7 +63,7 @@ az bicep build --file infra/compare/storage.bicep --stdout > /dev/null
 - Il resource group di laboratorio `wpc-2026` deve già esistere in Italy North. Compilare i file `.example` con nomi univoci e subscription autorizzata; non committare state, piani o credenziali.
 - Il bootstrap richiede un operatore autorizzato per il control plane Storage, managed identity, RBAC e policy. Il container usa `storage_account_id`: in AzureRM 5.12.0 la creazione avviene tramite ARM. L'accesso Blob data plane serve poi a CI e operatore per state e locking. L'identità CI è Reader sul RG e non può fare deployment. Il bootstrap assegna i permessi Storage per l'apply a un utente umano esplicitamente selezionato, non a GitHub.
 - Il repository è pubblico dal 30 ottobre 2026: [i required reviewers degli environment sono disponibili sui repository pubblici con Free, Pro e Team](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#required-reviewers). Le protezioni non sono ancora configurate: il codice attuale resta **plan in CI, revisione e apply manuali fuori dalla CI** e non offre un approval gate GitHub né separazione obbligatoria tra due persone. Per aggiungere apply protetto servono secondo revisore reale, no self-review, no bypass admin e identità federata separata; la sola visibilità pubblica non li attiva.
-- Impostare `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_PLAN_CLIENT_ID`, `TF_STATE_ACCOUNT`, `SALES_STORAGE_NAME` e `OPERATIONS_STORAGE_NAME` come variabili GitHub. Non esiste un client apply della pipeline.
+- Impostare `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_PLAN_CLIENT_ID` e `TF_STATE_ACCOUNT` come variabili GitHub. Nomi Storage, cost center, owner e service label provengono dai [file team versionati](infra/workload/teams/), passati esplicitamente tramite `-var-file`; le vecchie variabili `SALES_STORAGE_NAME`/`OPERATIONS_STORAGE_NAME` non sono più lette. Non esiste un client apply della pipeline. Per replicare il lab scegliere nomi globalmente disponibili prima del provisioning; i nomi inclusi sono quelli di questo sandbox pubblico.
 - Ricavare il subject OIDC effettivo di `main` con il workflow di ispezione e inserirlo nel bootstrap: non assumere il formato legacy. Nessun client secret è necessario.
 - `main` richiede PR, check `validate` dell'app GitHub Actions e branch aggiornato; le regole si applicano anche agli amministratori, force push e cancellazione sono disabilitati. Non sono richieste approvazioni umane delle PR: manca un secondo revisore. `CODEOWNERS` non dimostra una review e questi controlli non sono un gate sul deployment. Chi può amministrare le protezioni può comunque riconfigurarle.
 - Approvare costo e piano prima di qualsiasi apply. Nessun provisioning o cleanup viene eseguito dai test locali.

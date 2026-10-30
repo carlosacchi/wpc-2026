@@ -33,6 +33,14 @@ function baseline(team = "sales") {
 for (const team of ["sales", "operations"]) {
   test(`accepts compliant ${team} plan`, () => assert.deepEqual(checkPlan(baseline(team), team), []));
 }
+test("accepts a service-label-only update without permitting a replacement", () => {
+  const plan = baseline();
+  plan.resource_changes[0].change.actions = ["update"];
+  plan.resource_changes[0].change.after.tags.serviceLabel = "sales-platform";
+  assert.deepEqual(checkPlan(plan, "sales"), []);
+  plan.resource_changes[0].change.actions = ["delete", "create"];
+  assert.ok(checkPlan(plan, "sales").some(message => message.includes("replacement")));
+});
 for (const [name, mutate] of [
   ["public network", p => { p.resource_changes[0].change.after.public_network_access = "Enabled"; }],
   ["missing costCenter", p => { delete p.resource_changes[0].change.after.tags.costCenter; }],

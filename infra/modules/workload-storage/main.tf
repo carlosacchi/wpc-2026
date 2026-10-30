@@ -12,6 +12,10 @@ variable "location" { type = string }
 variable "team" { type = string }
 variable "cost_center" { type = string }
 variable "owner" { type = string }
+variable "service_label" {
+  type    = string
+  default = ""
+}
 
 resource "azurerm_storage_account" "this" {
   name                            = var.name
@@ -25,13 +29,13 @@ resource "azurerm_storage_account" "this" {
   allow_nested_items_to_be_public = false
   https_traffic_only_enabled      = true
   min_tls_version                 = "TLS1_2"
-  tags = {
+  tags = merge({
     project     = "wpc-2026"
     environment = "sandbox"
     tenant      = var.team
     costCenter  = var.cost_center
     owner       = var.owner
-  }
+  }, var.service_label == "" ? {} : { serviceLabel = var.service_label })
 }
 
 output "id" {
