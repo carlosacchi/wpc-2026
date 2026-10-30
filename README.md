@@ -15,7 +15,7 @@ La sessione mette a fuoco un problema pratico: come far lavorare un agente AI su
 - [Pipeline](.github/workflows/): validazione senza credenziali sulle PR, solo plan manuale da `main`, ispezione dei subject OIDC senza login Azure.
 - [Verifica artefatto](scripts/plan-artifact.mjs): checksum, commit, run, tentativo, team e destinazione prima dell'apply manuale dell'operatore.
 
-Il laboratorio è in costruzione: test locali non equivalgono a una prova Azure end-to-end.
+Codice e workflow sono pubblicati. La [prima esecuzione CI](https://github.com/carlosacchi/wpc-2026/actions/runs/41131228129) ha superato test Node, Terraform mock, gate sui piani e compilazione Bicep. Anche la [diagnostica OIDC](https://github.com/carlosacchi/wpc-2026/actions/runs/41131232709) è riuscita. Non sono ancora una prova Azure end-to-end: nessuna risorsa è stata creata.
 
 ## Verifica locale
 
@@ -37,11 +37,11 @@ az bicep build --file infra/compare/storage.bicep --stdout > /dev/null
 ## Prima di usare Azure e le pipeline
 
 - Il resource group di laboratorio `wpc-2026` deve già esistere in Italy North. Compilare i file `.example` con nomi univoci e subscription autorizzata; non committare state, piani o credenziali.
-- Il bootstrap richiede un operatore autorizzato per Storage (anche data plane), managed identity, RBAC e policy. L'identità CI è Reader sul RG e non può fare deployment. Il bootstrap assegna i permessi Storage per l'apply a un utente umano esplicitamente selezionato, non a GitHub.
+- Il bootstrap richiede un operatore autorizzato per il control plane Storage, managed identity, RBAC e policy. Il container usa `storage_account_id`: in AzureRM 5.12.0 la creazione avviene tramite ARM. L'accesso Blob data plane serve poi a CI e operatore per state e locking. L'identità CI è Reader sul RG e non può fare deployment. Il bootstrap assegna i permessi Storage per l'apply a un utente umano esplicitamente selezionato, non a GitHub.
 - Il repository è pubblico dal 30 ottobre 2026: [i required reviewers degli environment sono disponibili sui repository pubblici con Free, Pro e Team](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#required-reviewers). Le protezioni non sono ancora configurate: il codice attuale resta **plan in CI, revisione e apply manuali fuori dalla CI** e non offre un approval gate GitHub né separazione obbligatoria tra due persone. Per aggiungere apply protetto servono secondo revisore reale, no self-review, no bypass admin e identità federata separata; la sola visibilità pubblica non li attiva.
 - Impostare `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_PLAN_CLIENT_ID`, `TF_STATE_ACCOUNT`, `SALES_STORAGE_NAME` e `OPERATIONS_STORAGE_NAME` come variabili GitHub. Non esiste un client apply della pipeline.
 - Ricavare il subject OIDC effettivo di `main` con il workflow di ispezione e inserirlo nel bootstrap: non assumere il formato legacy. Nessun client secret è necessario.
-- Proteggere `main` con review e check richiesti se il piano GitHub lo permette: `CODEOWNERS` da solo non obbliga una review. Senza branch protection non dichiarare enforced il percorso PR.
+- `main` richiede PR, check `validate` dell'app GitHub Actions e branch aggiornato; le regole si applicano anche agli amministratori, force push e cancellazione sono disabilitati. Non sono richieste approvazioni umane delle PR: manca un secondo revisore. `CODEOWNERS` non dimostra una review e questi controlli non sono un gate sul deployment. Chi può amministrare le protezioni può comunque riconfigurarle.
 - Approvare costo e piano prima di qualsiasi apply. Nessun provisioning o cleanup viene eseguito dai test locali.
 
 ## Handoff all'operatore
@@ -61,7 +61,7 @@ Eseguire l'apply da una postazione o account OS isolato dagli strumenti dell'age
 
 Un solo RG e una directory Entra: state e tag distinti **non** dimostrano isolamento RBAC tra tenant. L'operatore apply ha permessi Storage sull'intero RG, compreso il backend; in produzione separare scope, backend e identità. Usare un operatore dedicato senza ruoli amministrativi ereditati, distinto dal bootstrap: questi assegnamenti non rimuovono eventuali privilegi preesistenti.
 
-Il backend usa un endpoint pubblico autenticato Entra, senza Shared Key né accesso anonimo, con eccezione nominativa alla policy di rete. I workload hanno rete pubblica disabilitata ma nessun Private Endpoint: il laboratorio dimostra provisioning e governance del control plane, non accesso applicativo ai dati. Nel solo provider workload impostiamo [`features.storage.data_plane_available = false`](https://registry.terraform.io/providers/hashicorp/azurerm/5.12.0/docs/guides/features-block): evita i controlli data plane dello Storage Account; non usare qui `queue_properties` o `static_website`. Il backend e il container bootstrap richiedono comunque accesso data plane.
+Il backend usa un endpoint pubblico autenticato Entra, senza Shared Key né accesso anonimo, con eccezione nominativa alla policy di rete. I workload hanno rete pubblica disabilitata ma nessun Private Endpoint: il laboratorio dimostra provisioning e governance del control plane, non accesso applicativo ai dati. Nel solo provider workload impostiamo [`features.storage.data_plane_available = false`](https://registry.terraform.io/providers/hashicorp/azurerm/5.12.0/docs/guides/features-block); non usare qui `queue_properties` o `static_website`. Il backend Terraform richiede comunque accesso Blob data plane per state e locking, distinto dalla creazione ARM del container.
 
 Il principal plan è Reader sul control plane, ma ha accesso di scrittura al container state per locking. Gli artefatti plan sono potenzialmente sensibili. Delete e replacement vengono rifiutati dal gate; cleanup solo con piano separato e approvazione esplicita.
 
