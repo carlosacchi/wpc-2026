@@ -1,0 +1,6 @@
+subscription_id      = "00000000-0000-0000-0000-000000000001"
+backend_storage_name = "REPLACE_WITH_UNIQUE_NAME"
+
+# Copy the actual OIDC subjects from GitHub; do not assume the legacy subject format.
+plan_oidc_subject   = "REPLACE_WITH_EXACT_SUB_FOR_MAIN"
+operator_object_id = "REPLACE_WITH_HUMAN_OPERATOR_OBJECT_ID"

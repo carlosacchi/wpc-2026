@@ -1,0 +1,75 @@
+name: Reviewed workload plan (no deployment)
+run-name: Plan ${{ inputs.team }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      team:
+        description: Workload (separate state, shared lab RBAC scope)
+        required: true
+        type: choice
+        options: [sales, operations]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wpc-2026-plan
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: 'true'
+      ARM_USE_CLI: 'false'
+      ARM_USE_AZUREAD: 'true'
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_team: ${{ inputs.team }}
+      TF_VAR_storage_account_name: ${{ inputs.team == 'sales' && vars.SALES_STORAGE_NAME || vars.OPERATIONS_STORAGE_NAME }}
+      TF_VAR_cost_center: ${{ inputs.team == 'sales' && 'WPC-SALES' || 'WPC-OPS' }}
+      TF_VAR_owner: platform-team
+      STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: |
+          terraform -chdir=infra/workload init -lockfile=readonly \
+            -backend-config="storage_account_name=$STATE_ACCOUNT" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=$TF_VAR_team.tfstate" \
+            -backend-config="use_azuread_auth=true"
+          terraform -chdir=infra/workload validate
+          terraform -chdir=infra/workload plan -input=false -out=workload.tfplan
+          terraform -chdir=infra/workload show -json workload.tfplan > infra/workload/plan.json
+          node scripts/check-plan.mjs infra/workload/plan.json "$TF_VAR_team"
+          node scripts/plan-artifact.mjs write infra/workload "$TF_VAR_team" "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: reviewed-plan-${{ inputs.team }}
+          path: |
+            infra/workload/workload.tfplan
+            infra/workload/plan-metadata.json
+          retention-days: 1
+          if-no-files-found: error

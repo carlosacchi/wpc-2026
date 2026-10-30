@@ -1,0 +1,40 @@
+name: Validate IaC
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+      - run: npm test
+      - run: terraform fmt -check -recursive infra
+      - name: Validate bootstrap (no Azure credentials)
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false -lockfile=readonly
+          terraform -chdir=infra/bootstrap validate
+          terraform -chdir=infra/bootstrap test
+      - name: Test workload using mocked Azure provider (no cloud calls)
+        run: |
+          terraform -chdir=infra/workload init -backend=false -lockfile=readonly
+          terraform -chdir=infra/workload validate
+          terraform -chdir=infra/workload test -verbose -json > terraform-test-events.jsonl
+          node scripts/check-mock-plans.mjs terraform-test-events.jsonl
+      - name: Compile Bicep comparison (no deployment)
+        run: az bicep build --file infra/compare/storage.bicep --stdout > /dev/null

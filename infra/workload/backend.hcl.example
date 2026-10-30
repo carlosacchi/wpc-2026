@@ -1,0 +1,7 @@
+storage_account_name = "REPLACE_WITH_BOOTSTRAP_OUTPUT"
+container_name       = "tfstate"
+key                  = "sales.tfstate"
+use_azuread_auth     = true
+# Locally, authenticate with a deliberately selected az login identity.
+# Select OIDC in CI or Azure CLI locally via ARM_* environment variables.
+# Do not persist use_oidc or client_id in backend configuration or saved plans.
