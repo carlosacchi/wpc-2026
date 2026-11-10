@@ -363,7 +363,7 @@ s = new("Solo titolo", "Tenant simulati, confini reali", """
 - La mappa tenant → RG sta nel gate, non nei file che l'agente modifica.
 """)
 box(s, 0.45, 1.6, 12.4, 4.85, fill=None, line=GREY)
-label(s, 0.6, 1.62, 6, 0.4, "Subscription · una directory Entra", size=13, color=GREY)
+label(s, 0.75, 1.68, 6, 0.4, "Subscription · una directory Entra", size=13, color=GREY)
 cards = [("wpc-2026 · piattaforma", VIOLET, ["Storage di state (lock)", "Container tfstate-<tenant>", "MI plan: Reader + what-if",
                                             "Policy: Deny + DenyAction"]),
          ("wpc-2026-sales · ring 0", TEAL, ["Storage wpc26salesb0b966", "MI apply sales: solo questo RG", "Environment «sales»",
