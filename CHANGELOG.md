@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+Correzioni emerse dalla prova generale.
+
+### Corretto
+- `scripts/demo-reset.mjs`: il reset si interrompeva dopo l'apertura della PR (`Cannot read properties of null`) perché l'attesa dei check ignorava lo stdout. Emerso nella prima prova generale con drift reale.
+
+### Verificato
+- Prova generale completa in Azure: rinomina → PR verde → doppio DENY (run 42919010193); correzione → approvazione del revisore → `0 added, 1 changed` → HEALTHY (run 42919302894); `demo:reset` → PR #9 unita; il rollout di riallineamento (run 42920906060) attende l'approvazione del revisore.
+
 ## 0.4.0
 
 Materiali della sessione WPC 2026: deck, note dello speaker, demo e immagini.

@@ -21,7 +21,7 @@ gh run list --workflow rollout.yml --limit 3   # l'ultima run baseline deve esse
 ```
 
 - Verificare in Azure che esistano `wpc26salesb0b966` (wpc-2026-sales) e `wpc26opsb0b966` (wpc-2026-operations); l'ultima run baseline li controlla entrambi (HEALTHY).
-- Se non è tutto pulito: `npm run demo:reset` e far approvare gli eventuali ring.
+- Se non è tutto pulito: `npm run demo:reset` e far approvare gli eventuali ring. Il reset richiede un working tree pulito: file non tracciati (per esempio un template fuori da `.gitignore`) lo bloccano.
 - **Credenziali dell'agente.** Il terminale integrato di VS Code non deve avere accesso ad Azure, altrimenti l'agente agisce con i permessi Owner del relatore (lo schema del caso PocketOS). Nel terminale A:
 
   ```sh
@@ -101,11 +101,12 @@ Il revisore approva i ring che riportano il tag `serviceLabel` alla baseline; po
 
 ## Run di backup
 
-Da aggiornare dopo la prova generale.
+Prova generale completa eseguita il 10/11/2026 (passi 1–4 e reset; il passo 5 era stato verificato in precedenza).
 
 | Passo | Run |
 |---|---|
 | Canary baseline approvato (apply + HEALTHY) | https://github.com/carlosacchi/wpc-2026/actions/runs/42823102175 |
 | Baseline rings=all (Sales senza modifiche) | https://github.com/carlosacchi/wpc-2026/actions/runs/42917201757 |
-| Rinomina → doppio DENY | _da registrare_ |
-| Correzione → approvazione → HEALTHY | _da registrare_ |
+| Rinomina → doppio DENY (prova generale) | https://github.com/carlosacchi/wpc-2026/actions/runs/42919010193 |
+| Correzione → approvazione → `0 added, 1 changed` → HEALTHY | https://github.com/carlosacchi/wpc-2026/actions/runs/42919302894 |
+| Reset dopo la prova (`demo:reset`, rings=all) | https://github.com/carlosacchi/wpc-2026/actions/runs/42920906060 |
