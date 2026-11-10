@@ -10,3 +10,6 @@ whatif.json
 terraform-test-events.jsonl
 infra/bootstrap/imports.generated.tf
 node_modules/
+docs/Template_WPC2026.pptx
+docs/session/out/
+__pycache__/

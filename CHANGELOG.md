@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+Materiali della sessione WPC 2026: deck, note dello speaker, demo e immagini.
+
+### Aggiunto
+- `docs/session/build_deck.py`: genera il deck da 45 minuti (22 slide più 2 di backup nascoste) sul template ufficiale, con diagrammi nativi, output reali dei gate e note dello speaker con i tempi; scrive anche `speaker-notes.md`.
+- `docs/session/assets/`: illustrazioni generate (copertina, scope sbagliato, livelli di difesa) e screenshot reale dell'approvazione dell'environment.
+- `docs/session/demo-runbook.md` e `docs/session/prompts.md`: demo live con Copilot Chat in agent mode, ruoli separati (relatore, revisore, terminale dell'operatore), terminale dell'agente senza credenziali Azure, fallback e reset.
+- `.github/copilot-instructions.md`: istruzioni di repository per Copilot (mai apply/delete, spiegare l'impatto del piano), presentate come guida e non come controllo.
+
+### Modificato
+- `.gitignore`: esclusi il template WPC e il deck generato (`docs/session/out/`).
+
 ## 0.3.0
 
 Reset ripetibile della demo e rollback governato.
