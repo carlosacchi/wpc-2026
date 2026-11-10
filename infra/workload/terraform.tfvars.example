@@ -1,5 +1,6 @@
 subscription_id      = "00000000-0000-0000-0000-000000000001"
 team                 = "sales"
+resource_group_name  = "wpc-2026-sales"
 storage_account_name = "REPLACE_WITH_UNIQUE_NAME"
 cost_center          = "WPC-SALES"
 owner                = "platform-team"

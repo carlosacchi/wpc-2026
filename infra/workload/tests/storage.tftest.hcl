@@ -5,6 +5,7 @@ run "sales_baseline" {
   variables {
     subscription_id      = "00000000-0000-0000-0000-000000000001"
     team                 = "sales"
+    resource_group_name  = jsondecode(file("teams/sales.tfvars.json")).resource_group_name
     storage_account_name = jsondecode(file("teams/sales.tfvars.json")).storage_account_name
     cost_center          = jsondecode(file("teams/sales.tfvars.json")).cost_center
     owner                = jsondecode(file("teams/sales.tfvars.json")).owner
@@ -25,6 +26,7 @@ run "operations_baseline" {
   variables {
     subscription_id      = "00000000-0000-0000-0000-000000000001"
     team                 = "operations"
+    resource_group_name  = jsondecode(file("teams/operations.tfvars.json")).resource_group_name
     storage_account_name = jsondecode(file("teams/operations.tfvars.json")).storage_account_name
     cost_center          = jsondecode(file("teams/operations.tfvars.json")).cost_center
     owner                = jsondecode(file("teams/operations.tfvars.json")).owner
@@ -41,6 +43,7 @@ run "preserve_tags_when_service_label_omitted" {
   variables {
     subscription_id      = "00000000-0000-0000-0000-000000000001"
     team                 = "sales"
+    resource_group_name  = "wpc-2026-sales"
     storage_account_name = "wpcsalestest"
     cost_center          = "DEMO-SALES"
     owner                = "platform-team"
@@ -56,9 +59,36 @@ run "reject_unknown_team" {
   variables {
     subscription_id      = "00000000-0000-0000-0000-000000000001"
     team                 = "other"
+    resource_group_name  = "wpc-2026-sales"
     storage_account_name = "wpcinvalidtest"
     cost_center          = "DEMO"
     owner                = "platform-team"
   }
   expect_failures = [var.team]
+}
+
+run "reject_resource_group_outside_lab_boundary" {
+  command = plan
+  variables {
+    subscription_id      = "00000000-0000-0000-0000-000000000001"
+    team                 = "sales"
+    resource_group_name  = "rg-production"
+    storage_account_name = "wpcsalestest"
+    cost_center          = "DEMO-SALES"
+    owner                = "platform-team"
+  }
+  expect_failures = [var.resource_group_name]
+}
+
+run "reject_shared_lab_resource_group" {
+  command = plan
+  variables {
+    subscription_id      = "00000000-0000-0000-0000-000000000001"
+    team                 = "sales"
+    resource_group_name  = "wpc-2026"
+    storage_account_name = "wpcsalestest"
+    cost_center          = "DEMO-SALES"
+    owner                = "platform-team"
+  }
+  expect_failures = [var.resource_group_name]
 }

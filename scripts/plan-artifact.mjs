@@ -30,9 +30,25 @@ export function verifyArtifact(metadata, actual) {
   const run = actual.run;
   if (!run || String(run.id) !== metadata.runId || String(run.run_attempt) !== metadata.runAttempt ||
       run.head_sha !== metadata.commit || run.head_branch !== "main" ||
-      run.event !== "workflow_dispatch" || run.path !== ".github/workflows/plan.yml" ||
+      run.event !== "workflow_dispatch" || run.path !== ".github/workflows/rollout.yml" ||
       run.status !== "completed" || run.conclusion !== "success") {
     throw new Error("Expected the successful main-branch plan workflow run and attempt.");
+  }
+  return metadata;
+}
+
+export function verifyInRun(metadata, env, actual) {
+  validateMetadata(metadata);
+  if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REF !== "refs/heads/main") {
+    throw new Error("In-run verification must run in the main-branch GitHub workflow.");
+  }
+  const expected = {
+    repository: env.GITHUB_REPOSITORY, runId: env.GITHUB_RUN_ID, commit: env.GITHUB_SHA,
+    subscriptionId: env.ARM_SUBSCRIPTION_ID, tenantId: env.ARM_TENANT_ID, stateAccount: env.STATE_ACCOUNT,
+    team: actual.team, sha256: actual.sha256
+  };
+  for (const [key, value] of Object.entries(expected)) {
+    if (metadata[key] !== value) throw new Error(`Saved plan mismatch: ${key}.`);
   }
   return metadata;
 }
@@ -43,8 +59,8 @@ function command(program, args) {
 
 function main() {
   const [mode, directory, team, repository] = process.argv.slice(2);
-  if (!["write", "check"].includes(mode) || !directory || !team || !repository) {
-    throw new Error("Usage: node scripts/plan-artifact.mjs write|check DIRECTORY TEAM OWNER/REPO");
+  if (!["write", "verify", "check"].includes(mode) || !directory || !team || !repository) {
+    throw new Error("Usage: node scripts/plan-artifact.mjs write|verify|check DIRECTORY TEAM OWNER/REPO");
   }
   const metadataPath = resolve(directory, "plan-metadata.json");
   const sha256 = createHash("sha256").update(readFileSync(resolve(directory, "workload.tfplan"))).digest("hex");
@@ -67,6 +83,11 @@ function main() {
   const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
   validateMetadata(metadata);
   if (metadata.repository !== repository) throw new Error("Saved plan belongs to a different repository.");
+  if (mode === "verify") {
+    verifyInRun(metadata, process.env, { team, sha256 });
+    console.log(`PASS: ${team} plan from this run (${metadata.runId}), commit ${metadata.commit}, SHA256 ${sha256}.`);
+    return;
+  }
   if (command("git", ["status", "--porcelain", "--untracked-files=no"])) {
     throw new Error("Use a clean checkout: tracked files differ from the run commit.");
   }

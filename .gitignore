@@ -1,0 +1,12 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+plan.json
+plan-metadata.json
+whatif.json
+terraform-test-events.jsonl
+infra/bootstrap/imports.generated.tf
+node_modules/

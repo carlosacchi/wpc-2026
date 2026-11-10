@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateMetadata, verifyArtifact } from "../scripts/plan-artifact.mjs";
+import { validateMetadata, verifyArtifact, verifyInRun } from "../scripts/plan-artifact.mjs";
 
 function fixture() {
   const metadata = {
@@ -19,7 +19,7 @@ function fixture() {
     ...metadata,
     run: {
       id: 123, run_attempt: 1, head_sha: metadata.commit, head_branch: "main",
-      event: "workflow_dispatch", path: ".github/workflows/plan.yml",
+      event: "workflow_dispatch", path: ".github/workflows/rollout.yml",
       status: "completed", conclusion: "success"
     }
   };
@@ -42,7 +42,7 @@ for (const key of ["repository", "team", "sha256", "commit", "terraformVersion",
 for (const [key, value] of [
   ["id", 124], ["run_attempt", 2], ["head_sha", "c".repeat(40)],
   ["head_branch", "feature"], ["event", "pull_request"],
-  ["path", ".github/workflows/other.yml"], ["status", "in_progress"], ["conclusion", "failure"]
+  ["path", ".github/workflows/plan.yml"], ["status", "in_progress"], ["conclusion", "failure"]
 ]) {
   test(`rejects wrong workflow run: ${key}`, () => {
     const { metadata, actual } = fixture();
@@ -56,6 +56,44 @@ for (const metadata of [null, {}, { ...fixture().metadata, runId: "../other" }, 
     assert.throws(() => validateMetadata(metadata), /Invalid/);
   });
 }
+
+function runEnv(metadata) {
+  return {
+    GITHUB_ACTIONS: "true", GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY: metadata.repository,
+    GITHUB_RUN_ID: metadata.runId, GITHUB_SHA: metadata.commit,
+    ARM_SUBSCRIPTION_ID: metadata.subscriptionId, ARM_TENANT_ID: metadata.tenantId, STATE_ACCOUNT: metadata.stateAccount
+  };
+}
+
+test("apply job accepts only the plan bound to this run, commit, team and digest", () => {
+  const { metadata } = fixture();
+  assert.equal(verifyInRun(metadata, runEnv(metadata), { team: "sales", sha256: metadata.sha256 }), metadata);
+});
+
+for (const [name, mutate] of [
+  ["other run", (env) => { env.GITHUB_RUN_ID = "999"; }],
+  ["other commit", (env) => { env.GITHUB_SHA = "c".repeat(40); }],
+  ["other repository", (env) => { env.GITHUB_REPOSITORY = "example/fork"; }],
+  ["other subscription", (env) => { env.ARM_SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000009"; }],
+  ["other state account", (env) => { env.STATE_ACCOUNT = "otherstate"; }],
+  ["other tenant team", (env, actual) => { actual.team = "operations"; }],
+  ["tampered plan", (env, actual) => { actual.sha256 = "f".repeat(64); }]
+]) {
+  test(`apply job rejects ${name}`, () => {
+    const { metadata } = fixture();
+    const env = runEnv(metadata);
+    const actual = { team: "sales", sha256: metadata.sha256 };
+    mutate(env, actual);
+    assert.throws(() => verifyInRun(metadata, env, actual), /mismatch/);
+  });
+}
+
+test("apply job verification refuses non-main or local execution", () => {
+  const { metadata } = fixture();
+  for (const env of [{}, { ...runEnv(metadata), GITHUB_REF: "refs/heads/feature" }]) {
+    assert.throws(() => verifyInRun(metadata, env, { team: "sales", sha256: metadata.sha256 }), /main-branch/);
+  }
+});
 
 test("CLI writes the actual binary digest, refuses overwrite and rejects non-CI use", () => {
   const directory = mkdtempSync(join(tmpdir(), "wpc-plan-artifact-"));

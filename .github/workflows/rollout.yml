@@ -1,0 +1,49 @@
+name: Governed rollout (canary rings, approval, what-if)
+run-name: Rollout ${{ inputs.scenario }} / ${{ inputs.rings }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Versioned team configuration, or deterministic rename fallback (never applied)
+        required: true
+        default: baseline
+        type: choice
+        options: [baseline, rename-demo]
+      rings:
+        description: Stop after the canary tenant, or continue to the next ring once it is healthy
+        required: true
+        default: canary-only
+        type: choice
+        options: [canary-only, all]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wpc-2026-rollout
+  cancel-in-progress: false
+
+jobs:
+  ring0:
+    name: Ring 0 canary (sales)
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/tenant-ring.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      team: sales
+      scenario: ${{ inputs.scenario }}
+
+  ring1:
+    name: Ring 1 (operations)
+    needs: ring0
+    if: inputs.rings == 'all' && inputs.scenario == 'baseline'
+    uses: ./.github/workflows/tenant-ring.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      team: operations
+      scenario: ${{ inputs.scenario }}

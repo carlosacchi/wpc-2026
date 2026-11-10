@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkPlan } from "../scripts/plan-policy.mjs";
+import { checkPlan, resourceGroupFor, tenantResourceGroups } from "../scripts/plan-policy.mjs";
 
 function baseline(team = "sales") {
   return {
@@ -18,7 +18,7 @@ function baseline(team = "sales") {
         actions: ["create"],
         after_unknown: {},
         after: {
-          resource_group_name: "wpc-2026", location: "italynorth",
+          resource_group_name: tenantResourceGroups[team], location: "italynorth",
           account_tier: "Standard", account_replication_type: "LRS", account_kind: "StorageV2",
           public_network_access: "Disabled", shared_access_key_enabled: false,
           allow_nested_items_to_be_public: false, https_traffic_only_enabled: true,
@@ -51,6 +51,9 @@ for (const [name, mutate] of [
   ["cross-team tags", p => { p.resource_changes[0].change.after.tags.tenant = "operations"; }],
   ["wrong region", p => { p.resource_changes[0].change.after.location = "westeurope"; }],
   ["wrong scope", p => { p.resource_changes[0].change.after.resource_group_name = "production"; }],
+  ["legacy shared lab RG", p => { p.resource_changes[0].change.after.resource_group_name = "wpc-2026"; }],
+  ["other tenant RG", p => { p.resource_changes[0].change.after.resource_group_name = "wpc-2026-operations"; }],
+  ["unknown RG", p => { p.resource_changes[0].change.after_unknown.resource_group_name = true; }],
   ["delete", p => { p.resource_changes[0].change.actions = ["delete"]; }],
   ["replacement", p => { p.resource_changes[0].change.actions = ["delete", "create"]; }],
   ["unreviewed resource", p => { p.resource_changes.push({ ...p.resource_changes[0], address: "unexpected" }); }],
@@ -70,6 +73,11 @@ test("rejects malformed, errored and partial plans", () => {
   }
 });
 test("rejects unsupported teams", () => assert.throws(() => checkPlan(baseline(), "production")));
+test("tenant resource groups stay inside the wpc-* boundary", () => {
+  for (const team of Object.keys(tenantResourceGroups)) assert.match(resourceGroupFor(team), /^wpc-/);
+  assert.throws(() => resourceGroupFor("__proto__"));
+  assert.ok(Object.isFrozen(tenantResourceGroups));
+});
 
 function renamePlan(actions = ["delete", "create"]) {
   const plan = baseline();

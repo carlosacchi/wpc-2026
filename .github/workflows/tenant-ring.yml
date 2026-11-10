@@ -1,0 +1,234 @@
+name: Tenant ring (plan, what-if, approval, apply, verify)
+
+on:
+  workflow_call:
+    inputs:
+      team:
+        required: true
+        type: string
+      scenario:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: 'true'
+  ARM_USE_CLI: 'false'
+  ARM_USE_AZUREAD: 'true'
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_team: ${{ inputs.team }}
+  TEAM: ${{ inputs.team }}
+  SCENARIO: ${{ inputs.scenario }}
+  STATE_ACCOUNT: ${{ vars.TF_STATE_ACCOUNT }}
+
+jobs:
+  plan:
+    name: Plan + gates (${{ inputs.team }})
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+    outputs:
+      changes: ${{ steps.impact.outputs.changes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Resolve tenant resource group from the platform gate (not from team files)
+        run: |
+          rg=$(node --input-type=module -e 'import { resourceGroupFor } from "./scripts/plan-policy.mjs"; console.log(resourceGroupFor(process.env.TEAM));')
+          echo "RESOURCE_GROUP=$rg" >> "$GITHUB_ENV"
+      - name: Select deliberate rename fallback (no source or state edits)
+        if: inputs.scenario == 'rename-demo'
+        run: |
+          original=$(jq -r .storage_account_name "infra/workload/teams/$TEAM.tfvars.json")
+          candidate="${original}r"
+          if [[ ! "$candidate" =~ ^[a-z0-9]{3,24}$ ]]; then
+            echo "::error::Baseline storage name plus suffix r must be 3-24 lowercase alphanumeric characters."
+            exit 1
+          fi
+          echo "RENAME_STORAGE_NAME=$candidate" >> "$GITHUB_ENV"
+      - name: Terraform plan (saved, no apply)
+        run: |
+          terraform -chdir=infra/workload init -lockfile=readonly \
+            -backend-config="storage_account_name=$STATE_ACCOUNT" \
+            -backend-config="container_name=tfstate-$TEAM" \
+            -backend-config="key=workload.tfstate" \
+            -backend-config="use_azuread_auth=true"
+          terraform -chdir=infra/workload validate
+          args=()
+          if [[ "$SCENARIO" == "rename-demo" ]]; then args+=("-var=storage_account_name=$RENAME_STORAGE_NAME"); fi
+          terraform -chdir=infra/workload plan -input=false \
+            -var-file="teams/$TEAM.tfvars.json" "${args[@]}" -out=workload.tfplan
+          terraform -chdir=infra/workload show -no-color workload.tfplan
+          terraform -chdir=infra/workload show -json workload.tfplan > infra/workload/plan.json
+      - name: Bicep What-If on the same tenant scope (read-only, never deployed)
+        run: |
+          cfg="infra/workload/teams/$TEAM.tfvars.json"
+          name="${RENAME_STORAGE_NAME:-$(jq -r .storage_account_name "$cfg")}"
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "wpc-whatif-$GITHUB_RUN_ID-$TEAM" \
+            --template-file infra/compare/storage.bicep \
+            --parameters storageAccountName="$name" team="$TEAM" \
+              costCenter="$(jq -r .cost_center "$cfg")" owner="$(jq -r .owner "$cfg")" \
+              serviceLabel="$(jq -r .service_label "$cfg")" \
+            --validation-level ProviderNoRbac \
+            --no-pretty-print > whatif.json
+      - name: Terraform gate
+        id: tfgate
+        continue-on-error: true
+        run: |
+          args=()
+          if [[ "$SCENARIO" == "rename-demo" ]]; then args+=(--expect-rename); fi
+          node scripts/check-plan.mjs infra/workload/plan.json "$TEAM" "${args[@]}"
+      - name: Bicep What-If gate
+        id: whatifgate
+        continue-on-error: true
+        run: node scripts/check-whatif.mjs whatif.json "$TEAM"
+      - name: Decision (both gates must allow)
+        run: |
+          echo "Terraform gate: ${{ steps.tfgate.outcome }} / Bicep What-If gate: ${{ steps.whatifgate.outcome }}"
+          if [[ "${{ steps.tfgate.outcome }}" != "success" || "${{ steps.whatifgate.outcome }}" != "success" ]]; then
+            echo "::error::DENY: the change does not reach approval. No artifact is published, no apply job can start."
+            exit 1
+          fi
+      - name: Summarise impact
+        id: impact
+        run: |
+          changes=$(jq '[.resource_changes[] | select(.change.actions != ["no-op"])] | length' infra/workload/plan.json)
+          echo "changes=$([[ "$changes" -gt 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "Terraform resources with changes: $changes"
+      - name: Bind permitted plan to exact run and target
+        if: inputs.scenario == 'baseline'
+        run: node scripts/plan-artifact.mjs write infra/workload "$TEAM" "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.scenario == 'baseline'
+        with:
+          name: reviewed-plan-${{ inputs.team }}
+          path: |
+            infra/workload/workload.tfplan
+            infra/workload/plan-metadata.json
+          retention-days: 1
+          if-no-files-found: error
+
+  apply:
+    name: Apply after human approval (${{ inputs.team }})
+    needs: plan
+    if: inputs.scenario == 'baseline' && needs.plan.outputs.changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Required reviewer, no self-review and main-only deployment are configured on this environment.
+    environment:
+      name: ${{ inputs.team }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_APPLY_CLIENT_ID }}
+    steps:
+      - name: Refuse a missing or shared apply identity
+        env:
+          PLAN_CLIENT_ID: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+        run: |
+          if [[ -z "$ARM_CLIENT_ID" || "$ARM_CLIENT_ID" == "$PLAN_CLIENT_ID" ]]; then
+            echo "::error::Set AZURE_APPLY_CLIENT_ID on the $TEAM environment to that tenant's apply identity."
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: reviewed-plan-${{ inputs.team }}
+          path: infra/workload
+      - name: Verify the plan is the one approved in this run
+        run: node scripts/plan-artifact.mjs verify infra/workload "$TEAM" "$GITHUB_REPOSITORY"
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          client-id: ${{ vars.AZURE_APPLY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Re-check the saved plan, then apply exactly that plan
+        run: |
+          terraform -chdir=infra/workload init -lockfile=readonly \
+            -backend-config="storage_account_name=$STATE_ACCOUNT" \
+            -backend-config="container_name=tfstate-$TEAM" \
+            -backend-config="key=workload.tfstate" \
+            -backend-config="use_azuread_auth=true"
+          terraform -chdir=infra/workload show -json workload.tfplan > infra/workload/plan.json
+          node scripts/check-plan.mjs infra/workload/plan.json "$TEAM"
+          terraform -chdir=infra/workload apply -input=false workload.tfplan
+
+  verify:
+    name: Ring health check (${{ inputs.team }})
+    needs: [plan, apply]
+    if: >-
+      always() && inputs.scenario == 'baseline' && needs.plan.result == 'success' &&
+      (needs.apply.result == 'success' || needs.apply.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
+        with:
+          client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify live state, guardrails and absence of drift
+        run: |
+          rg=$(node --input-type=module -e 'import { resourceGroupFor } from "./scripts/plan-policy.mjs"; console.log(resourceGroupFor(process.env.TEAM));')
+          name=$(jq -r .storage_account_name "infra/workload/teams/$TEAM.tfvars.json")
+          az storage account show -g "$rg" -n "$name" -o json > storage.json
+          jq -e --arg team "$TEAM" '.publicNetworkAccess == "Disabled" and .allowSharedKeyAccess == false and .allowBlobPublicAccess == false and .tags.tenant == $team' storage.json
+          az lock list -g "$rg" --query "[?level=='CanNotDelete'] | length(@)" -o tsv | grep -qx '[1-9][0-9]*' || { echo "::error::Missing CanNotDelete lock on $rg"; exit 1; }
+          az policy assignment list -g "$rg" --query "[?name=='wpc-deny-storage-delete' && enforcementMode=='Default'] | length(@)" -o tsv | grep -qx 1 || { echo "::error::Missing denyAction assignment on $rg"; exit 1; }
+          terraform -chdir=infra/workload init -lockfile=readonly \
+            -backend-config="storage_account_name=$STATE_ACCOUNT" \
+            -backend-config="container_name=tfstate-$TEAM" \
+            -backend-config="key=workload.tfstate" \
+            -backend-config="use_azuread_auth=true"
+          terraform -chdir=infra/workload plan -input=false -lock=false -detailed-exitcode \
+            -var-file="teams/$TEAM.tfvars.json" > /dev/null
+          echo "HEALTHY: $name in $rg is private, locked, protected by denyAction and drift-free."

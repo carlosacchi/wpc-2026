@@ -1,8 +1,21 @@
-const supportedTeams = new Set(["sales", "operations"]);
 const requiredTags = ["project", "environment", "tenant", "costCenter", "owner"];
 
+// Owned by the platform team, deliberately not read from the team files an agent can edit.
+export const tenantResourceGroups = Object.freeze({
+  sales: "wpc-2026-sales",
+  operations: "wpc-2026-operations"
+});
+export const labResourceGroupPattern = /^wpc-[a-z0-9-]{1,86}$/;
+
+export function resourceGroupFor(team) {
+  if (!Object.hasOwn(tenantResourceGroups, team)) throw new Error("Expected team sales or operations.");
+  const name = tenantResourceGroups[team];
+  if (!labResourceGroupPattern.test(name)) throw new Error(`Resource group ${name} is outside the wpc-* lab boundary.`);
+  return name;
+}
+
 export function checkPlan(plan, team) {
-  if (!supportedTeams.has(team)) throw new Error("Expected team sales or operations.");
+  const resourceGroup = resourceGroupFor(team);
   if (!plan || plan.errored || plan.complete === false ||
       typeof plan.format_version !== "string" ||
       !plan.format_version.startsWith("1.") ||
@@ -38,7 +51,7 @@ export function checkPlan(plan, team) {
       continue;
     }
     const expected = {
-      resource_group_name: "wpc-2026",
+      resource_group_name: resourceGroup,
       location: "italynorth",
       account_tier: "Standard",
       account_replication_type: "LRS",

@@ -1,0 +1,29 @@
+# Changelog
+
+## 0.2.0
+
+Rollout governato multi-tenant: le promesse del titolo diventano pipeline reali.
+
+### Aggiunto
+- Tenant simulati con un RG ciascuno (`wpc-2026-sales`, `wpc-2026-operations`), con container di state e managed identity di apply separati e federati sull'environment GitHub del tenant.
+- `rollout.yml` e `tenant-ring.yml`: ring canary (Sales, poi Operations), plan Terraform e Bicep What-If (`ProviderNoRbac`) sullo stesso scope, doppio gate, approvazione umana tramite environment, apply del piano salvato, controllo di salute e drift.
+- Gate What-If (`scripts/whatif-policy.mjs`, `check-whatif.mjs`): solo Create/Modify/NoChange/Ignore, solo Storage nel RG del tenant, proprietà conformi, DENY sulla rinomina implicita in modalità incrementale.
+- `plan-artifact verify`: l'artefatto deve provenire dalla stessa run, dallo stesso commit e dallo stesso target, con sha256 identico.
+- Azure Policy `DenyAction` sul delete degli Storage del lab, lock `CanNotDelete` su RG dei tenant e Storage di state, `prevent_destroy` sui RG dei tenant.
+- Ruolo custom per il What-If, limitato a `whatIf`/`validate`.
+- `scripts/bootstrap-imports.mjs`: rigenera gli import per le risorse esistenti se lo state locale del bootstrap va perso.
+- `docs/case-study.md`: Atlassian 2022, Azure DevOps 2023 e casi agentici mappati sui controlli del lab.
+- Test di coerenza tra bootstrap, file dei team, gate e workflow.
+
+### Modificato
+- Il gate Terraform risolve il RG dal tenant e rifiuta il RG condiviso `wpc-2026`, i RG di altri tenant e qualsiasi nome fuori da `wpc-*`.
+- Il workload richiede `resource_group_name`, con la stessa validazione.
+- La variabile `plan_oidc_subject` del bootstrap è sostituita da `github_oidc_subject_prefix`. Il subject di plan deriva da `main` e quelli di apply dagli environment.
+
+### Rimosso
+- `plan.yml`, sostituito da `rollout.yml`.
+- L'apply manuale dell'operatore e la variabile `operator_object_id`. Gli assegnamenti esistenti in Azure vanno rimossi a mano dopo approvazione.
+
+## 0.1.0
+
+- Laboratorio iniziale: bootstrap, workload Terraform Sales/Operations, confronto Bicep, gate sul piano, workflow plan-only e ispezione dei subject OIDC.
