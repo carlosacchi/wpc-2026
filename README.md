@@ -80,6 +80,22 @@ npm run demo:reset    # PR che ripristina i file → CI validate → merge → r
 
 Sul palco questo è anche il messaggio sul rollback: **non si "torna indietro" cancellando**, si riporta in produzione l'ultima configurazione nota e buona, con gli stessi gate. La cancellazione degli Storage (teardown dopo l'evento) resta un'operazione break-glass della piattaforma: va prima disattivata la DenyAction (`effect=Disabled`) e rimosso il lock, sempre con approvazione esplicita.
 
+## Materiali della sessione
+
+In [docs/session/](docs/session/):
+
+- [build_deck.py](docs/session/build_deck.py): unica fonte di slide, diagrammi (forme native, modificabili in PowerPoint) e note dello speaker. Genera il deck sul template ufficiale WPC 2026 e [speaker-notes.md](docs/session/speaker-notes.md).
+- [demo-runbook.md](docs/session/demo-runbook.md): preflight, ruoli, comandi, fallback e reset della demo live.
+- [prompts.md](docs/session/prompts.md): i prompt per Copilot Chat in agent mode.
+- [.github/copilot-instructions.md](.github/copilot-instructions.md): istruzioni di repository per Copilot. Sono una guida, non un controllo: in sessione si mostra che i gate decidono comunque.
+
+Il template e il deck generato non sono versionati (branding dell'evento): il template va messo in `docs/Template_WPC2026.pptx`.
+
+```sh
+python -m pip install -r docs/session/requirements.txt
+python docs/session/build_deck.py   # -> docs/session/out/WPC2026-Copilot-sotto-controllo.pptx
+```
+
 ## Verifica locale
 
 Prerequisiti: Node.js 22+, Terraform 1.14.9 (come in CI) e Azure CLI 2.76+ con Bicep. Non servono credenziali Azure.
