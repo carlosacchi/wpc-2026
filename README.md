@@ -2,48 +2,71 @@
 
 Materiale di lavoro per la sessione accettata:
 
-> **Copilot sotto controllo: Platform Eng multi-tenant su Azure con Terraform, Bicep e policy gates**
+> **Copilot sotto controllo: Platform Engineering multi-tenant su Azure con Terraform, Bicep e policy gates**
 
-La sessione mette a fuoco un problema pratico: come far lavorare un agente AI sull'IaC senza affidargli il potere di decidere da solo cosa può arrivare in Azure.
+La sessione affronta un problema concreto: far lavorare un agente AI sull'IaC senza lasciargli decidere da solo cosa arriva in Azure. Il caso di partenza è reale: un'operazione di manutenzione corretta nella forma ma sbagliata nello scope. È successo nel [PIR Atlassian di aprile 2022](https://www.atlassian.com/engineering/post-incident-review-april-2022-outage) e nel [postmortem Azure DevOps di maggio 2023](https://status.dev.azure.com/_event/392143683/post-mortem). Mappatura completa in [docs/case-study.md](docs/case-study.md).
 
-## Laboratorio
+## Cosa dimostra il laboratorio
 
-- [Bootstrap](infra/bootstrap/main.tf): backend Terraform, identità federate, RBAC e Azure Policy.
-- [Workload Terraform](infra/workload/main.tf): Sales e Operations con lo stesso [modulo Storage](infra/modules/workload-storage/main.tf).
-- [Bicep di confronto](infra/compare/storage.bicep): baseline equivalente, non un secondo deployment della stessa risorsa.
-- [Gate sul piano](scripts/plan-policy.mjs): regole didattiche esplicite e [test](tests/plan-policy.test.mjs), non uno scanner di sicurezza completo.
-- [Pipeline](.github/workflows/): validazione senza credenziali sulle PR, solo plan manuale da `main`, ispezione dei subject OIDC senza login Azure.
-- [Verifica artefatto](scripts/plan-artifact.mjs): checksum, commit, run, tentativo, team e destinazione prima dell'apply manuale dell'operatore.
+| Promessa del titolo | Dove è implementata |
+|---|---|
+| Multi-tenant (simulato) | Un RG per tenant (`wpc-2026-sales`, `wpc-2026-operations`), container di state e identità di apply separati per tenant ([bootstrap](infra/bootstrap/main.tf)) |
+| Terraform | [Workload](infra/workload/main.tf) con lo stesso [modulo Storage](infra/modules/workload-storage/main.tf) e [file team versionati](infra/workload/teams/) |
+| Bicep | [Template equivalente](infra/compare/storage.bicep) usato **solo** per l'ARM What-If, mai applicato |
+| Plan / what-if | `terraform plan` salvato e `az deployment group what-if --validation-level ProviderNoRbac` sullo stesso scope del tenant |
+| Policy gates | [Gate Terraform](scripts/plan-policy.mjs) e [gate What-If](scripts/whatif-policy.mjs): devono permettere entrambi |
+| Policy-as-code in Azure | Azure Policy `Deny` (Storage pubblico) e `DenyAction` (delete degli Storage del lab) su ogni RG |
+| Canary deploy | [rollout.yml](.github/workflows/rollout.yml): ring 0 Sales, poi ring 1 Operations solo se il canary è sano |
+| Approvazione umana | Job apply legato all'environment GitHub del tenant (required reviewer, no self-review) |
 
-Codice e workflow sono pubblicati. La [prima esecuzione CI](https://github.com/carlosacchi/wpc-2026/actions/runs/41131228129) ha superato test Node, Terraform mock, gate sui piani e compilazione Bicep. Anche la [diagnostica OIDC](https://github.com/carlosacchi/wpc-2026/actions/runs/41131232709) è riuscita. Il bootstrap Azure è stato applicato dopo approvazione: 9 risorse, poi piano senza modifiche; backend, federazione e policy riletti da Azure. Il workload e la sequenza replacement restano da verificare end-to-end.
+Il flusso di ogni ring è definito in [tenant-ring.yml](.github/workflows/tenant-ring.yml):
 
-## Demo: una rinomina che implica una distruzione
-
-Non mostriamo un `destroy` eseguito: rinominiamo il parametro di uno Storage sandbox esistente e lasciamo che Terraform ne calcoli l'impatto.
-
-1. **Preparazione:** configurare le variabili GitHub e lanciare il piano baseline Sales. Dopo review, l'operatore crea lo Storage applicando esattamente quell'artefatto su una postazione isolata.
-2. **Baseline:** ripetere il piano, che deve risultare senza cambiamenti.
-3. **Copilot e PR:** chiedere all'agente di modificare soltanto `storage_account_name` nel [file Sales versionato](infra/workload/teams/sales.tfvars.json), aggiungendo `r`, e di spiegare l'impatto senza apply. Leggere il diff, aprire PR, attendere la CI senza credenziali Azure. Se Copilot segnala subito il rischio, è un risultato positivo, non un errore da nascondere. Dopo review, unire solo per il preview sandbox: il workflow non può applicare.
-4. **Impatto:** `terraform validate` passa; il piano mostra il nome che forza replacement, `-/+` e una creazione/cancellazione. Un piano riuscito non significa cambiamento autorizzato.
-5. **Blocco:** lanciare `baseline` dal main aggiornato: legge la configurazione di quel commit, anche se pericolosa. `Enforce policy` mostra `DENY` e termina con errore; metadata e upload non vengono eseguiti. Non esiste un job apply né un pulsante per approvare comunque.
-6. **Correzione con Copilot:** ripristinare il nome fisico originale e usare `service_label` per la nuova classificazione, senza modificare gate, test, workflow o state. Il modulo traduce l'etichetta nel tag `serviceLabel` senza cambiare il nome Azure. Nuova PR, CI, merge, dispatch `baseline`: atteso solo update tag, zero distruzioni. Operatore isolato rivede e autorizza soltanto questo piano; verificare ID invariato e tag dopo apply.
-
-```sh
-gh workflow run plan.yml --repo carlosacchi/wpc-2026 --ref main \
-  -f team=sales -f scenario=baseline
-# Dopo ogni merge, baseline legge proprio il file versionato, non un valore GitHub.
-# Fallback deterministico SOLO con nome originale e Storage esistente:
-gh workflow run plan.yml --repo carlosacchi/wpc-2026 --ref main \
-  -f team=sales -f scenario=rename-demo
+```text
+plan (MI plan, Reader)            apply (MI del tenant)             verify (MI plan)
+├─ RG dal gate, non dai file team ├─ environment = tenant → umano  ├─ Storage privato e taggato
+├─ terraform plan salvato         ├─ stesso run, sha256, commit    ├─ lock CanNotDelete presente
+├─ Bicep What-If (ProviderNoRbac) ├─ ricontrollo gate              ├─ denyAction assegnata
+├─ gate TF + gate What-If         └─ apply di QUEL piano           └─ plan -detailed-exitcode = 0
+└─ artefatto legato alla run
 ```
 
-Il primo comando produce soltanto un piano: non crea il workload. La demo negativa deve fallire per **replacement osservato**, non per credenziali mancanti o un generico errore. Se lo Storage iniziale manca, il controllo `--expect-rename` restituisce un errore esplicito, non spaccia una creazione per una sostituzione. Le fixture dei test restano sintetiche. Anche il [confronto Bicep](infra/compare/storage.bicep) supporta il parametro opzionale `serviceLabel` come tag, non come rinomina fisica: non applicare entrambi i motori alla stessa risorsa e non usare il gate JSON Terraform sull'output ARM What-If.
+## Livelli di difesa
 
-`rename-demo` resta il fallback ripetibile: legge lo stesso file, poi aggiunge `r` con un override esplicito, stampa `IMPACT`/`OBSERVED` e rifiuta il replacement. Non presentarlo come diff prodotto da Copilot. La storia principale usa invece PR e configurazione versionata con scenario `baseline`. Il controllo non dipende da chi scrive il cambiamento. Un piano consentito passa alla review/apply manuale descritta sotto; nessun environment GitHub attende un'approvazione umana. Un altro terminale della stessa postazione non isola l'agente dalle credenziali.
+Ogni livello presuppone che il precedente possa fallire, compreso il caso in cui l'agente o una persona modifichi il codice.
+
+1. **Gate in CI**: rifiuta delete e replace (`-/+`), RG fuori dal tenant, proprietà non conformi, rinomina implicita in Bicep incrementale (crea il nuovo Storage e lascia l'originale orfano). La mappa tenant→RG sta nel gate, non nei file che l'agente modifica.
+2. **Approvazione umana** nell'environment del tenant, con un revisore diverso da chi lancia il rollout.
+3. **Identità di minimo privilegio**: l'apply di Sales ha *Storage Account Contributor* solo su `wpc-2026-sales` e scrive solo in `tfstate-sales`. La MI di plan è Reader e ha un ruolo custom limitato a `whatIf`/`validate`.
+4. **Azure Policy `DenyAction`** sul delete degli Storage del lab, con cascade sul RG. Funziona anche se si aggira la pipeline.
+5. **Resource lock `CanNotDelete`** sui RG dei tenant e sullo Storage di state, più `prevent_destroy` in Terraform.
+
+I nomi dei RG sono vincolati a `wpc-*` (e mai `wpc-2026`) nel bootstrap, nel workload e nel gate: la subscription contiene altri carichi reali.
+
+## Demo
+
+```sh
+# 1. Canary: plan + what-if + gate su Sales; l'apply attende l'approvazione nell'environment "sales"
+gh workflow run rollout.yml --repo carlosacchi/wpc-2026 --ref main -f scenario=baseline -f rings=canary-only
+
+# 2. Allargamento: Sales di nuovo (atteso zero cambi), poi Operations dopo il controllo di salute
+gh workflow run rollout.yml --repo carlosacchi/wpc-2026 --ref main -f scenario=baseline -f rings=all
+
+# 3. Fallback deterministico della rinomina: entrambi i gate devono rispondere DENY, senza apply
+gh workflow run rollout.yml --repo carlosacchi/wpc-2026 --ref main -f scenario=rename-demo -f rings=canary-only
+```
+
+Storia principale sul palco:
+
+1. Si chiede a Copilot (chat o coding agent) di rinominare lo Storage di Sales nel [file versionato](infra/workload/teams/sales.tfvars.json). La PR passa `validate`: `terraform validate` non vede il problema.
+2. Dopo il merge, `rollout baseline`: il piano mostra `-/+`, il What-If mostra un nuovo Storage e l'originale ignorato. **Entrambi i gate rispondono DENY**, il job fallisce prima dell'artefatto e l'environment non viene mai raggiunto.
+3. Si chiede a Copilot di correggere: nome fisico originale e nuova classificazione in `service_label` (solo tag). Nuovo rollout: aggiornamento in-place di un tag, approvazione nell'environment, apply, verifica di salute, poi ring 1.
+4. Rete di sicurezza: anche un `az storage account delete` lanciato a mano viene rifiutato prima dal lock e, tolto il lock, dalla DenyAction.
+
+`rename-demo` legge lo stesso file e aggiunge `r` con un override esplicito: è il fallback ripetibile e non va presentato come diff prodotto da Copilot.
 
 ## Verifica locale
 
-Prerequisiti: Node.js 22+, Terraform 1.14.9 e Azure CLI con Bicep. AzureRM è bloccato dai lock file; non servono credenziali Azure per questi test.
+Prerequisiti: Node.js 22+, Terraform 1.14.9 (come in CI) e Azure CLI 2.76+ con Bicep. Non servono credenziali Azure.
 
 ```sh
 npm test
@@ -58,35 +81,31 @@ node scripts/check-mock-plans.mjs terraform-test-events.jsonl
 az bicep build --file infra/compare/storage.bicep --stdout > /dev/null
 ```
 
-## Prima di usare Azure e le pipeline
+## Bootstrap (operatore della piattaforma)
 
-- Il resource group di laboratorio `wpc-2026` deve già esistere in Italy North. Compilare i file `.example` con nomi univoci e subscription autorizzata; non committare state, piani o credenziali.
-- Il bootstrap richiede un operatore autorizzato per il control plane Storage, managed identity, RBAC e policy. Il container usa `storage_account_id`: in AzureRM 5.12.0 la creazione avviene tramite ARM. L'accesso Blob data plane serve poi a CI e operatore per state e locking. L'identità CI è Reader sul RG e non può fare deployment. Il bootstrap assegna i permessi Storage per l'apply a un utente umano esplicitamente selezionato, non a GitHub.
-- Il repository è pubblico dal 30 ottobre 2026: [i required reviewers degli environment sono disponibili sui repository pubblici con Free, Pro e Team](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#required-reviewers). Le protezioni non sono ancora configurate: il codice attuale resta **plan in CI, revisione e apply manuali fuori dalla CI** e non offre un approval gate GitHub né separazione obbligatoria tra due persone. Per aggiungere apply protetto servono secondo revisore reale, no self-review, no bypass admin e identità federata separata; la sola visibilità pubblica non li attiva.
-- Impostare `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_PLAN_CLIENT_ID` e `TF_STATE_ACCOUNT` come variabili GitHub. Nomi Storage, cost center, owner e service label provengono dai [file team versionati](infra/workload/teams/), passati esplicitamente tramite `-var-file`; le vecchie variabili `SALES_STORAGE_NAME`/`OPERATIONS_STORAGE_NAME` non sono più lette. Non esiste un client apply della pipeline. Per replicare il lab scegliere nomi globalmente disponibili prima del provisioning; i nomi inclusi sono quelli di questo sandbox pubblico.
-- Ricavare il subject OIDC effettivo di `main` con il workflow di ispezione e inserirlo nel bootstrap: non assumere il formato legacy. Nessun client secret è necessario.
-- `main` richiede PR, check `validate` dell'app GitHub Actions e branch aggiornato; le regole si applicano anche agli amministratori, force push e cancellazione sono disabilitati. Non sono richieste approvazioni umane delle PR: manca un secondo revisore. `CODEOWNERS` non dimostra una review e questi controlli non sono un gate sul deployment. Chi può amministrare le protezioni può comunque riconfigurarle.
-- Approvare costo e piano prima di qualsiasi apply. Nessun provisioning o cleanup viene eseguito dai test locali.
+Il bootstrap crea governance e identità. Non è eseguito dalla CI. L'operatore lo applica in locale, dopo aver rivisto il piano.
 
-## Handoff all'operatore
+1. Copiare [terraform.tfvars.example](infra/bootstrap/terraform.tfvars.example) in `terraform.tfvars` (file ignorato da git). Il prefisso del subject OIDC si ricava con il workflow [oidc-subject.yml](.github/workflows/oidc-subject.yml).
+2. Se lo state locale è andato perso, rigenerare gli import delle risorse esistenti:
+   `node scripts/bootstrap-imports.mjs <storage-di-state>`. Il file `imports.generated.tf` è ignorato da git.
+3. `terraform -chdir=infra/bootstrap plan -out=bootstrap.tfplan`. Il piano atteso non contiene `destroy`. Applicare solo dopo approvazione.
+4. Creare gli environment GitHub `sales` e `operations` con:
+   - required reviewer e *prevent self-review*;
+   - solo il branch `main`;
+   - la variabile `AZURE_APPLY_CLIENT_ID` uguale all'output `apply_client_ids[<tenant>]`.
 
-Su una copia pulita del commit della run, con Terraform 1.14.9, `gh` autenticato al repository e Azure CLI autenticata come utente operatore:
+   Il job apply rifiuta un ID mancante o uguale a quello di plan.
 
-1. Scaricare con `gh run download RUN_ID --name reviewed-plan-sales --dir DIRECTORY` (oppure Operations). Non usare artefatti di altre run.
-2. Impostare `OPERATOR_OBJECT_ID` e `STATE_ACCOUNT` con gli output del bootstrap. Selezionare la subscription corretta in Azure CLI.
-3. Eseguire `node scripts/plan-artifact.mjs check DIRECTORY sales carlosacchi/wpc-2026`. Il controllo verifica anche run riuscita, tentativo, commit locale, versione Terraform, login operatore, tenant, subscription e backend. Richiede la lettura del proprio profilo Entra.
-4. Usare `ARM_USE_OIDC=false`, `ARM_USE_CLI=true`, `ARM_USE_AZUREAD=true`; rimuovere variabili di autenticazione residue di service principal, OIDC, MSI, SAS o Shared Key. Inizializzare lo stesso backend e la stessa chiave `sales.tfstate` con `-lockfile=readonly`, senza salvare opzioni OIDC o client ID nel backend.
-5. Leggere il piano binario con `terraform show`, rigenerarne il JSON e ripetere `scripts/check-plan.mjs`. Verificare anche il diff del codice. Il checksum rileva incongruenze, non è un'attestazione crittografica di provenienza né un'approvazione.
-6. Solo dopo l'approvazione umana eseguire `terraform apply` con il percorso assoluto di **quel piano salvato**, senza un nuovo plan. Il piano salvato non richiede un secondo prompt; il comando manuale è il punto di autorizzazione.
+Variabili di repository: `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_PLAN_CLIENT_ID`, `TF_STATE_ACCOUNT`. Nessun client secret: tutte le identità sono federate con OIDC.
 
-Eseguire l'apply da una postazione o account OS isolato dagli strumenti dell'agente, senza cache o file di credenziali condivisi. **Un altro terminale dello stesso utente non isola `az login`.** GitHub non applica, non conserva credenziali di deployment e non serializza gli apply manuali: è responsabilità dell'operatore procedere Sales → verifica → Operations. Il flusso Azure end-to-end deve ancora essere provato.
+Gli assegnamenti di versioni precedenti (Storage Account Contributor e Blob Data Contributor dell'operatore, accesso della MI di plan al container `tfstate` legacy) non sono più gestiti dal codice. Vanno rimossi a mano dopo approvazione.
 
-## Limiti intenzionali
+## Limiti dichiarati
 
-Un solo RG e una directory Entra: state e tag distinti **non** dimostrano isolamento RBAC tra tenant. L'operatore apply ha permessi Storage sull'intero RG, compreso il backend; in produzione separare scope, backend e identità. Usare un operatore dedicato senza ruoli amministrativi ereditati, distinto dal bootstrap: questi assegnamenti non rimuovono eventuali privilegi preesistenti.
-
-Il backend usa un endpoint pubblico autenticato Entra, senza Shared Key né accesso anonimo, con eccezione nominativa alla policy di rete. I workload hanno rete pubblica disabilitata ma nessun Private Endpoint: il laboratorio dimostra provisioning e governance del control plane, non accesso applicativo ai dati. Nel solo provider workload impostiamo [`features.storage.data_plane_available = false`](https://registry.terraform.io/providers/hashicorp/azurerm/5.12.0/docs/guides/features-block); non usare qui `queue_properties` o `static_website`. Il backend Terraform richiede comunque accesso Blob data plane per state e locking, distinto dalla creazione ARM del container.
-
-Il principal plan è Reader sul control plane, ma ha accesso di scrittura al container state per locking. Gli artefatti plan sono potenzialmente sensibili. Delete e replacement vengono rifiutati dal gate; cleanup solo con piano separato e approvazione esplicita.
-
-Su un repository pubblico considerare pubblici codice e log; non trattare gli artefatti come deposito confidenziale. Usare solo risorse e dati sintetici, evitare credenziali e valori sensibili nei piani. Il cambio di visibilità non pubblica automaticamente i materiali locali esclusi da Git.
+- **Una sola directory Entra e una sola subscription.** I tenant sono RG con identità, state e policy separati: è l'isolamento di una piattaforma interna multi-team, non quello di un SaaS multi-tenant. Chi ha ruoli ereditati sulla subscription, come Contributor, scavalca questo isolamento.
+- **Il canary è per tenant (ring)**, non uno split di traffico: lo Storage non ha traffico da instradare.
+- **Il What-If è un preview.** Con `ProviderNoRbac` non verifica i permessi di scrittura. Il ruolo custom (`whatIf`/`validate` più Reader) va confermato alla prima run reale.
+- **La DenyAction copre solo `delete`.** Il replace via Terraform è fermato dal gate e da `prevent_destroy`, non dalla policy. Lock e DenyAction rendono deliberato anche il cleanup: prima si tolgono, poi si cancella, sempre con approvazione.
+- Il backend di state usa un endpoint pubblico autenticato Entra, senza Shared Key, con un'eccezione nominativa alla policy di rete. I workload non hanno Private Endpoint: il lab dimostra governance del control plane, non accesso ai dati.
+- Repository pubblico: codice, log e artefatti vanno considerati pubblici. Usare solo risorse e dati sintetici.
+- `CODEOWNERS` e branch protection non sostituiscono l'approvazione dell'environment, e chi amministra il repository può riconfigurarli.

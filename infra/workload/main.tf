@@ -10,6 +10,15 @@ variable "team" {
   }
 }
 
+variable "resource_group_name" {
+  type        = string
+  description = "Tenant resource group created by the bootstrap. Lab resources must stay inside wpc-* groups."
+  validation {
+    condition     = can(regex("^wpc-[a-z0-9-]{1,86}$", var.resource_group_name)) && var.resource_group_name != "wpc-2026"
+    error_message = "Use the tenant resource group (wpc-*), never the shared lab group or a non-lab group."
+  }
+}
+
 variable "storage_account_name" {
   type = string
   validation {
@@ -42,7 +51,7 @@ variable "service_label" {
 module "storage" {
   source              = "../modules/workload-storage"
   name                = var.storage_account_name
-  resource_group_name = "wpc-2026"
+  resource_group_name = var.resource_group_name
   location            = "italynorth"
   team                = var.team
   cost_center         = var.cost_center

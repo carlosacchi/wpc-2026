@@ -1,6 +1,12 @@
 subscription_id      = "00000000-0000-0000-0000-000000000001"
 backend_storage_name = "REPLACE_WITH_UNIQUE_NAME"
 
-# Copy the actual OIDC subjects from GitHub; do not assume the legacy subject format.
-plan_oidc_subject   = "REPLACE_WITH_EXACT_SUB_FOR_MAIN"
-operator_object_id = "REPLACE_WITH_HUMAN_OPERATOR_OBJECT_ID"
+# Repository part of the real OIDC subject (see the "Inspect OIDC subject" workflow).
+# The bootstrap derives ":ref:refs/heads/main" for plan and ":environment:<tenant>" for apply.
+github_oidc_subject_prefix = "repo:OWNER@OWNER_ID/REPO@REPO_ID"
+
+# Optional: defaults are wpc-2026-sales and wpc-2026-operations. Only dedicated wpc-* groups are accepted.
+# tenants = {
+#   sales      = { resource_group_name = "wpc-2026-sales" }
+#   operations = { resource_group_name = "wpc-2026-operations" }
+# }
