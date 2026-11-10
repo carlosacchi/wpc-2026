@@ -64,6 +64,22 @@ Storia principale sul palco:
 
 `rename-demo` legge lo stesso file e aggiunge `r` con un override esplicito: è il fallback ripetibile e non va presentato come diff prodotto da Copilot.
 
+## Reset e rollback della demo
+
+Lo stato iniziale è versionato in [demo/baseline/](demo/baseline/): entrambi gli Storage esistono con la configurazione baseline. Questo è anche il prerequisito della demo rename. La demo cambia solo i file dei team e i tag, quindi il reset **non cancella nulla**: è un roll-forward verso la baseline, attraverso la stessa pipeline.
+
+```sh
+npm run demo:status   # differenze tra file dei team e baseline, PR aperte sui team, rollout non completati
+npm run demo:reset    # PR che ripristina i file → CI validate → merge → rollout baseline rings=all
+```
+
+- È idempotente: se file e Azure sono già allineati non apre la PR, e nel rollout l'apply viene saltato (resta solo il controllo di salute e drift).
+- Se Azure differisce, per esempio per il tag `serviceLabel` cambiato in sessione, ogni ring chiede l'approvazione nell'environment, come qualsiasi altro cambiamento. Anche il rollback è governato.
+- La prima esecuzione su un lab vuoto crea gli Storage baseline: lo stesso comando serve da *seed*.
+- I rollout sono serializzati: se una run attende approvazione, il reset aspetta in coda. Se la branch protection richiede un'approvazione, lo script si ferma dopo la CI e indica come procedere (`node scripts/demo-reset.mjs rollout` dopo il merge).
+
+Sul palco questo è anche il messaggio sul rollback: **non si "torna indietro" cancellando**, si riporta in produzione l'ultima configurazione nota e buona, con gli stessi gate. La cancellazione degli Storage (teardown dopo l'evento) resta un'operazione break-glass della piattaforma: va prima disattivata la DenyAction (`effect=Disabled`) e rimosso il lock, sempre con approvazione esplicita.
+
 ## Verifica locale
 
 Prerequisiti: Node.js 22+, Terraform 1.14.9 (come in CI) e Azure CLI 2.76+ con Bicep. Non servono credenziali Azure.

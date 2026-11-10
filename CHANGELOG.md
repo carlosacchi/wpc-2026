@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+Reset ripetibile della demo e rollback governato.
+
+### Aggiunto
+- `demo/baseline/`: stato iniziale versionato dei file dei team (entrambi gli Storage esistenti con configurazione baseline).
+- `scripts/demo-reset.mjs` (`npm run demo:status`, `npm run demo:reset`): rileva le differenze dalla baseline, apre una PR che ripristina i file, attende la CI, esegue il merge e lancia `rollout baseline rings=all`. Il rollback è un roll-forward: nessun delete, solo riallineamento in-place attraverso gli stessi gate e approvazioni. È idempotente e serve anche da seed su un lab vuoto.
+- Test sulla baseline: stessa forma dei file dei team, RG del tenant, rilevamento delle modifiche della demo.
+
+### Verificato
+- Bootstrap applicato in Azure (6 import, 28 add, 0 destroy), ri-plan senza modifiche, lock e DenyAction attivi sui RG dei tenant.
+- Environment `sales`/`operations` con revisore obbligatorio, no self-review, nessun bypass admin, solo `main`.
+- Primo rollout canary: entrambi i gate PASS, l'apply attende il revisore e chi ha lanciato la run non può approvare.
+
 ## 0.2.0
 
 Rollout governato multi-tenant: le promesse del titolo diventano pipeline reali.
