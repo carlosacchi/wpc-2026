@@ -26,7 +26,7 @@ Il laboratorio non inventa uno scenario. Riproduce in piccolo un modo di fallire
 |---|---|---|
 | [PocketOS, aprile 2026](https://www.theregister.com/software/2026/04/27/cursor-opus-agent-snuffs-out-startups-production-database/5224442) | Un agente di coding in staging trova un token in un file non correlato. Il token, con permessi più ampi del previsto, gli permette con una sola chiamata API di cancellare un volume con il database di produzione e i backup. | Le credenziali raggiungibili dall'agente sono il suo perimetro reale; ai delete serve un confine indipendente dal prompt. |
 | Replit / SaaStr, luglio 2025 | Un agente cancella un database di produzione durante un *code freeze* dichiarato. | Un'istruzione in linguaggio naturale non è un controllo. |
-| Amazon Q Developer, luglio 2025 (bollettino AWS-2025-015) | Un prompt distruttivo viene introdotto tramite contributo esterno in una versione dell'estensione. | La supply chain dell'agente fa parte della superficie d'attacco. |
+| [Amazon Q Developer, luglio 2025 (bollettino AWS-2025-015)](https://aws.amazon.com/security/security-bulletins/AWS-2025-015/) | Un token GitHub con permessi eccessivi nella configurazione CodeBuild permette di inserire codice malevolo nell'estensione per VS Code, rilasciato automaticamente nella versione 1.84.0. Il codice non è stato eseguito solo per un errore di sintassi. | La supply chain dell'agente fa parte della superficie d'attacco. |
 
 ## Dal post-mortem al laboratorio
 
@@ -34,11 +34,11 @@ Il lab simula una piattaforma interna con due tenant, Sales e Operations. È la 
 
 | Modo di fallire osservato | Dove si vede nei casi | Controllo nel lab | Tipo |
 |---|---|---|---|
-| Lo scope reale è più ampio di quello percepito | Atlassian (sito invece di app), ADO (server invece di DB) | Il gate risolve il RG dal tenant e rifiuta qualsiasi risorsa fuori scope. La mappa tenant→RG non sta nei file che l'agente modifica. | Preventivo, CI |
+| Lo scope reale è più ampio di quello percepito | Atlassian (sito invece di app), ADO (server invece di DB) | Il gate risolve il RG dal tenant e rifiuta qualsiasi risorsa fuori scope. La mappa tenant→RG non sta nei file dei team, e i file della piattaforma hanno un code owner diverso dal relatore. | Preventivo, CI |
 | Il cambiamento "sembra" un aggiornamento ma implica una distruzione | ADO (refuso in una PR enorme), rinomina in Terraform | `terraform plan` + gate: `-/+` e delete → DENY. What-If Bicep + gate: rinomina implicita → DENY. | Preventivo, CI |
 | La validazione sintattica passa | ADO (test non coprivano la condizione) | `terraform validate` passa: la decisione si basa sul **piano**, non sulla sintassi. | Didattico |
 | Il canary non incontra la condizione critica | ADO (Ring 0 senza snapshot) | Il ring 1 parte solo se il ring 0 supera il controllo di salute: Storage privato, lock, DenyAction e assenza di drift. I gate girano **in ogni ring**, non solo nel canary. | Detective + preventivo |
-| Credenziali troppo ampie | PocketOS, Atlassian | MI di plan Reader con ruolo custom solo `whatIf`/`validate`. Una MI di apply per tenant, limitata al suo RG e al suo container di state. | Minimo privilegio |
+| Credenziali troppo ampie | PocketOS, Atlassian | MI di plan Reader con ruolo custom solo `whatIf`/`validate`, più scrittura sui container di state (semplificazione del lab). Una MI di apply per tenant, limitata al suo RG e al suo container di state. | Minimo privilegio |
 | Nessun umano tra il piano e l'effetto | Tutti | Environment GitHub per tenant: revisore obbligatorio, no self-review, solo `main`. L'artefatto approvato è legato a run, commit e sha256. | Approvazione |
 | Il delete arriva per un'altra strada | PocketOS (API diretta) | `DenyAction` di Azure Policy e lock `CanNotDelete` sul RG, indipendenti dalla pipeline. | Piattaforma |
 
@@ -57,4 +57,4 @@ La regola "chi ha chiesto la PR non può approvarla" ha effetto **solo se la bra
 
 - Una directory Entra e una subscription: l'isolamento è per RG, identità, state e policy. Chi ha ruoli ereditati sulla subscription lo scavalca.
 - Il canary è per ring di tenant, non uno split di traffico.
-- La DenyAction copre solo `delete`. Il replace via Terraform è fermato dal gate e da `prevent_destroy`.
+- La DenyAction copre solo `delete`. Il replace dello Storage dei workload è fermato dal gate; `prevent_destroy` protegge solo lo state e i RG dei tenant.

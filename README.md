@@ -22,7 +22,7 @@ La sessione affronta un problema concreto: far lavorare un agente AI sull'IaC se
 Il flusso di ogni ring è definito in [tenant-ring.yml](.github/workflows/tenant-ring.yml):
 
 ```text
-plan (MI plan, Reader)            apply (MI del tenant)             verify (MI plan)
+plan (MI plan)                    apply (MI del tenant)             verify (MI plan)
 ├─ RG dal gate, non dai file team ├─ environment = tenant → umano  ├─ Storage privato e taggato
 ├─ terraform plan salvato         ├─ stesso run, sha256, commit    ├─ lock CanNotDelete presente
 ├─ Bicep What-If (ProviderNoRbac) ├─ ricontrollo gate              ├─ denyAction assegnata
@@ -34,9 +34,9 @@ plan (MI plan, Reader)            apply (MI del tenant)             verify (MI p
 
 Ogni livello presuppone che il precedente possa fallire, compreso il caso in cui l'agente o una persona modifichi il codice.
 
-1. **Gate in CI**: rifiuta delete e replace (`-/+`), RG fuori dal tenant, proprietà non conformi, rinomina implicita in Bicep incrementale (crea il nuovo Storage e lascia l'originale orfano). La mappa tenant→RG sta nel gate, non nei file che l'agente modifica.
+1. **Gate in CI**: rifiuta delete e replace (`-/+`), RG fuori dal tenant, proprietà non conformi, rinomina implicita in Bicep incrementale (crea il nuovo Storage e lascia l'originale orfano). La mappa tenant→RG sta nel gate, non nei file dei team. I file della piattaforma (gate, workflow, test, bootstrap, moduli) hanno in [CODEOWNERS](.github/CODEOWNERS) un proprietario diverso dal relatore: con *Require review from Code Owners* attivo su `main`, una PR che li modifica attende la sua approvazione. I file dei team non hanno proprietario.
 2. **Approvazione umana** nell'environment del tenant, con un revisore diverso da chi lancia il rollout.
-3. **Identità di minimo privilegio**: l'apply di Sales ha *Storage Account Contributor* solo su `wpc-2026-sales` e scrive solo in `tfstate-sales`. La MI di plan è Reader e ha un ruolo custom limitato a `whatIf`/`validate`.
+3. **Identità di minimo privilegio**: l'apply di Sales ha *Storage Account Contributor* solo su `wpc-2026-sales` e scrive solo in `tfstate-sales`. La MI di plan è Reader sui RG, ha un ruolo custom limitato a `whatIf`/`validate` e scrive i container di state dei tenant, perché il plan prende il lock sullo state (semplificazione del lab: in produzione andrebbe separata per tenant).
 4. **Azure Policy `DenyAction`** sul delete degli Storage del lab, con cascade sul RG. Funziona anche se si aggira la pipeline.
 5. **Resource lock `CanNotDelete`** sui RG dei tenant e sullo Storage di state, più `prevent_destroy` in Terraform.
 
@@ -137,7 +137,7 @@ Gli assegnamenti di versioni precedenti (Storage Account Contributor e Blob Data
 - **Una sola directory Entra e una sola subscription.** I tenant sono RG con identità, state e policy separati: è l'isolamento di una piattaforma interna multi-team, non quello di un SaaS multi-tenant. Chi ha ruoli ereditati sulla subscription, come Contributor, scavalca questo isolamento.
 - **Il canary è per tenant (ring)**, non uno split di traffico: lo Storage non ha traffico da instradare.
 - **Il What-If è un preview.** Con `ProviderNoRbac` non verifica i permessi di scrittura. Il ruolo custom (`whatIf`/`validate` più Reader) va confermato alla prima run reale.
-- **La DenyAction copre solo `delete`.** Il replace via Terraform è fermato dal gate e da `prevent_destroy`, non dalla policy. Lock e DenyAction rendono deliberato anche il cleanup: prima si tolgono, poi si cancella, sempre con approvazione.
+- **La DenyAction copre solo `delete`.** Il replace dello Storage dei workload è fermato dal gate, non dalla policy: `prevent_destroy` protegge solo lo state e i RG dei tenant. Lock e DenyAction rendono deliberato anche il cleanup: prima si tolgono, poi si cancella, sempre con approvazione.
 - Il backend di state usa un endpoint pubblico autenticato Entra, senza Shared Key, con un'eccezione nominativa alla policy di rete. I workload non hanno Private Endpoint: il lab dimostra governance del control plane, non accesso ai dati.
 - Repository pubblico: codice, log e artefatti vanno considerati pubblici. Usare solo risorse e dati sintetici.
 - `CODEOWNERS` e branch protection non sostituiscono l'approvazione dell'environment, e chi amministra il repository può riconfigurarli.
