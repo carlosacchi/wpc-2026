@@ -82,3 +82,4 @@ export function checkPlan(plan, team) {
   if (workloadCount !== 1) violations.push("Expected exactly one managed workload storage account.");
   return violations;
 }
+// test CODEOWNERS: questa PR non va unita
