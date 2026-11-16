@@ -1,1 +1,23 @@
-* @carlosacchi
+# Platform-owned paths. With "Require review from Code Owners" enabled on main,
+# a PR touching them waits for the platform reviewer, whoever wrote it (a person or Copilot).
+# There is deliberately no catch-all owner: the PR author cannot approve their own PR,
+# so owning everything would block the speaker's own changes, including the demo PRs.
+
+# Gates, checks, demo reset and the tests that guard them
+/scripts/              @azureitaliadevops
+/tests/                @azureitaliadevops
+/package.json          @azureitaliadevops
+
+# Pipelines, Copilot instructions and this file
+/.github/              @azureitaliadevops
+
+# Infrastructure owned by the platform
+/infra/bootstrap/      @azureitaliadevops
+/infra/modules/        @azureitaliadevops
+/infra/compare/        @azureitaliadevops
+/infra/workload/       @azureitaliadevops
+/demo/baseline/        @azureitaliadevops
+
+# Team files: no owner on purpose. This is where teams and agents propose changes;
+# the decision is taken later by the gates and by the environment approval.
+/infra/workload/teams/

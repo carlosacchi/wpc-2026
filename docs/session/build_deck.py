@@ -3,10 +3,12 @@
 Usage: python docs/session/build_deck.py [template.pptx] [output.pptx]
 Content, timing and speaker notes live here; diagrams are native shapes, editable in PowerPoint.
 """
+import re
 import sys
 from pathlib import Path
 
 import qrcode
+from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
@@ -47,12 +49,34 @@ for sld in list(prs.slides._sldIdLst):
     prs.slides._sldIdLst.remove(sld)
 
 
-def new(layout, title=None, notes="", hidden=False):
+TALK_SECONDS = 45 * 60
+CLOCK = [0]  # running time in seconds; notes get their [start–end] from here
+TIME_RE = re.compile(r"^\[(\d+):(\d\d)(?:–(\d+):(\d\d))?\]\s*")
+
+
+def mmss(sec):
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def new(layout, title=None, notes="", hidden=False, mins=None, name=None):
+    """mins: slide duration. If omitted, it is derived from a leading [m:ss–m:ss] (or [m:ss] = 0) in the notes.
+    The stamp is then recomputed from the running clock, so adding or cutting slides keeps the timing consistent."""
+    notes = notes.strip()
+    m = TIME_RE.match(notes)
+    if m and not hidden:
+        if mins is None:
+            start = int(m[1]) * 60 + int(m[2])
+            mins = ((int(m[3]) * 60 + int(m[4])) - start) / 60 if m[3] else 0
+        notes = notes[m.end():]
+    if mins is not None and not hidden:
+        start = CLOCK[0]
+        CLOCK[0] += round(mins * 60)
+        notes = (f"[{mmss(start)}] " if not mins else f"[{mmss(start)}–{mmss(CLOCK[0])}] ") + notes
     s = prs.slides.add_slide(LAYOUT[layout])
     if title is not None and s.shapes.title is not None:
         s.shapes.title.text = title
-    s.notes_slide.notes_text_frame.text = notes.strip()
-    NOTES.append((title or {"1_Diapositiva titolo": "Titolo", "Vuota": "Hook"}.get(layout, layout), notes.strip()))
+    s.notes_slide.notes_text_frame.text = notes
+    NOTES.append((name or title or {"1_Diapositiva titolo": "Titolo", "Vuota": "Hook"}.get(layout, layout), notes))
     if hidden:
         s._element.set("show", "0")
     return s
@@ -175,6 +199,44 @@ def picture(s, name, x, y, w=None, h=None):
                                 Inches(w) if w else None, Inches(h) if h else None)
 
 
+def table(s, rows, widths, x=0.5, y=1.7, row_h=0.45, size=15, head_size=16, first_col_bold=True):
+    """rows[0] is the header. Rows grow with their text when rendered."""
+    tbl = s.shapes.add_table(len(rows), len(widths), Inches(x), Inches(y), Inches(sum(widths)),
+                             Inches(row_h * len(rows))).table
+    for c, w in enumerate(widths):
+        tbl.columns[c].width = Inches(w)
+    for r_, row in enumerate(rows):
+        tbl.rows[r_].height = Inches(row_h)
+        for c, val in enumerate(row):
+            cell = tbl.cell(r_, c)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = RED if r_ == 0 else (LIGHT if r_ % 2 else WHITE)
+            tf = cell.text_frame
+            tf.clear()
+            tf.word_wrap = True
+            run = tf.paragraphs[0].add_run()
+            run.text = val
+            run.font.size = Pt(head_size if r_ == 0 else size)
+            run.font.bold = r_ == 0 or (c == 0 and first_col_bold)
+            run.font.color.rgb = WHITE if r_ == 0 else INK
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+    return tbl
+
+
+def columns(s, cols, y=1.65, h=3.75, size=15, gap=0.2, x0=0.45, width=12.4):
+    """cols: list of (header, color, [bullets]). Header band + light body, same height for all columns."""
+    w = (width - gap * (len(cols) - 1)) / len(cols)
+    for i, (head, color, items) in enumerate(cols):
+        x = x0 + i * (w + gap)
+        box(s, x, y, w, 0.6, head, fill=color, size=17, bold=True)
+        body = box(s, x, y + 0.6, w, h - 0.6, ["• " + t for t in items], fill=LIGHT, fg=INK, size=size,
+                   align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        body.text_frame.margin_left = body.text_frame.margin_right = Inches(0.15)
+        body.text_frame.margin_top = Inches(0.12)
+        for p in body.text_frame.paragraphs:
+            p.space_after = Pt(6)
+
+
 def section(n, title, sub, notes):
     s = new("Intestazione sezione", f"{n}. {title}", notes)
     fill_text(ph(s, 1).text_frame, [sub])
@@ -183,9 +245,9 @@ def section(n, title, sub, notes):
 
 # ---------------------------------------------------------------- 1. Title
 s = new("1_Diapositiva titolo", None, """
-[0:00–1:00] Presentazione.
-- Chi sono, una frase. Poi subito la domanda: quanti usano Copilot o un agente per scrivere IaC? Quanti lo lasciano arrivare in produzione?
-- Promessa: 45 minuti, un caso reale, una piattaforma vera su Azure, una demo live che fallisce di proposito.
+[0:00–0:30] Apro con due domande, mani alzate. Chi usa Copilot o un altro agente per scrivere Terraform o Bicep? E chi lascia che quel codice arrivi in produzione senza che una persona legga il piano?
+- Mi aspetto che la seconda domanda abbassi parecchie mani: la sessione parte da lì.
+- Della demo dico solo una cosa: fallirà di proposito, ed è il momento più interessante.
 """)
 s.shapes.title.text_frame.clear()
 tp = s.shapes.title.text_frame.paragraphs[0]
@@ -195,12 +257,49 @@ r2 = tp2.add_run(); r2.text = "Platform Engineering multi-tenant su Azure con Te
 r2.font.size = Pt(22); r2.font.bold = False
 fill_text(ph(s, 1).text_frame, ["Carlo Sacchi", "Lead DevOps | Metyis"])
 
+# ---------------------------------------------------------------- Chi sono
+s = new("Solo titolo", "Chi sono", """
+Quarantacinque secondi, non di più: il pubblico è qui per la demo.
+- Se c'è spazio per una frase sola, quella che lega il mio lavoro al tema: da dove nasce la domanda di questa sessione.
+- Azure Italia Podcast: un invito a chi ascolta in italiano, senza pubblicità lunga.
+- La pizza mezza italiana e mezza olandese di solito strappa un sorriso: lo lascio e vado avanti.
+""", mins=0.75)
+photo = ROOT / "docs/CarloSacchiBio.png"
+if photo.exists():
+    pic = s.shapes.add_picture(str(photo), Inches(0.8), Inches(1.9), Inches(3.4), Inches(3.4))
+    pic.auto_shape_type = MSO_SHAPE.OVAL
+else:
+    print("WARN: docs/CarloSacchiBio.png non trovato, nella slide 'Chi sono' uso le iniziali")
+    box(s, 0.8, 1.9, 3.4, 3.4, "CS", fill=NAVY, size=72, bold=True, shape=MSO_SHAPE.OVAL)
+label(s, 4.8, 1.8, 8.0, 0.8, "Carlo Sacchi", size=36, bold=True)
+label(s, 4.8, 2.6, 8.0, 0.5, "Lead DevOps · Metyis", size=22, color=RED)
+facts = [("Microsoft MVP", "Azure - Infrastructure as Code", ROOT / "docs/mvp2627.webp"),
+         ("Azure Italia Podcast", "il podcast in italiano su Microsoft Azure · azureitalia.cloud",
+          ROOT / "docs/2024 AZURE ITALIA SQUARE NUOVO WHITE 1200.png"),
+         ("Italiano, vivo ad Amsterdam", "carlosacchi.cloud", ASSETS / "pizza-it-nl.png")]
+LOGO = 1.05
+for i, (h, b, logo) in enumerate(facts):
+    y = 3.15 + i * (LOGO + 0.05)
+    if logo.exists():
+        if logo.suffix.lower() == ".webp":  # python-pptx does not embed WebP: convert once into out/
+            png = OUT.parent / (logo.stem + ".png")
+            png.parent.mkdir(parents=True, exist_ok=True)
+            Image.open(logo).save(png)
+            logo = png
+        s.shapes.add_picture(str(logo), Inches(4.8), Inches(y), Inches(LOGO), Inches(LOGO))
+    else:
+        print(f"WARN: {logo.relative_to(ROOT)} non trovato, nella slide 'Chi sono' uso il numero")
+        number(s, 4.8 + (LOGO - 0.55) / 2, y + (LOGO - 0.55) / 2, i + 1, d=0.55)
+    label(s, 6.1, y + 0.12, 6.8, 0.45, h, size=20, bold=True)
+    label(s, 6.1, y + 0.53, 6.8, 0.35, b, size=14, color=GREY)
+label(s, 0.8, 6.55, 12.0, 0.35, "linkedin.com/in/carlo-sacchi · github.com/carlosacchi", size=14, color=GREY)
+
 # ---------------------------------------------------------------- 2. Hook
 s = new("Vuota", None, """
-[1:00–2:00] Il gancio.
-- L'agente porta blocchi di infrastruttura in pochi secondi. Il cancello in mezzo non lo apre l'agente.
-- "Oggi non parliamo di prompt migliori. Parliamo di chi ha la chiave del cancello."
-- Non è sfiducia verso Copilot: è lo stesso schema che usiamo per le persone.
+[1:00–2:00] Lascio l'immagine parlare per due secondi, poi:
+- «Oggi chiedere a un agente di scrivere Terraform costa meno che chiedere un caffè. Il codice arriva in pochi secondi, ed è anche scritto bene. Il problema non è la qualità del codice.»
+- «Non parliamo di prompt migliori. Parliamo di chi ha la chiave del cancello.»
+- Anticipo l'obiezione: non è sfiducia verso Copilot. Sono le stesse regole che chiediamo alle persone da anni: review, piano, approvazione. L'agente entra in uno schema che esiste già, o che dovrebbe esistere.
 """)
 picture(s, "cover.jpg", 0, 0, w=13.333)
 label(s, 0.6, 2.2, 5.6, 2.6, [("L'agente scrive in secondi.", {"size": 36, "bold": True, "color": WHITE}),
@@ -208,7 +307,9 @@ label(s, 0.6, 2.2, 5.6, 2.6, [("L'agente scrive in secondi.", {"size": 36, "bold
 
 # ---------------------------------------------------------------- 3. Agenda
 s = new("Agenda", "Agenda", """
-[2:00–2:30] Agenda in 30 secondi. La demo è al centro e dura un terzo della sessione.
+[2:00–2:30] Trenta secondi. Faccio notare una sola cosa: la demo sta al centro e prende un terzo del tempo.
+- Ci arriviamo con due incidenti veri; dopo la demo parliamo di come si torna indietro e di cosa il lab NON dimostra.
+- Annunciare subito che c'è una slide di limiti dichiarati crea fiducia: chi è scettico si rilassa.
 """)
 fill_text(ph(s, 1).text_frame, [
     "Il caso: lo scope sbagliato, eseguito correttamente",
@@ -218,18 +319,68 @@ fill_text(ph(s, 1).text_frame, [
     "Rollback come roll-forward, limiti, takeaway",
 ], size=24)
 
+# ---------------------------------------------------------------- Glossary (short, on stage)
+# (term, general definition, meaning in this session) — kept in alphabetical order
+WORDS = sorted([
+    ("Canary / ring", "Rilascio graduale: il cambiamento va prima a un gruppo ristretto e si allarga solo se resta sano.",
+     "Ring 0 è Sales, ring 1 è Operations: Operations parte solo se Sales è sano."),
+    ("DenyAction e lock", "Protezioni dentro Azure: una Azure Policy che rifiuta un'azione e un blocco contro la cancellazione.",
+     "Rifiutano il delete degli Storage anche a chi passa fuori dalla pipeline."),
+    ("Environment GitHub", "In GitHub Actions, una destinazione di deploy con regole proprie: revisori, branch ammessi, variabili.",
+     "Il rollout si ferma finché un revisore, diverso da chi l'ha lanciato, non approva."),
+    ("Gate", "Controllo automatico in pipeline che fa proseguire o blocca un rilascio in base a regole esplicite.",
+     "Legge terraform plan e Bicep What-If e risponde PASS o DENY."),
+    ("IaC", "Infrastructure as Code: infrastruttura descritta in file versionati e applicata da strumenti, non a mano.",
+     "Terraform per i deploy, Bicep solo per l'anteprima What-If."),
+    ("Managed Identity (MI)", "Identità Azure senza password, gestita da Entra ID, con cui un servizio o una pipeline accede alle risorse.",
+     "Una per il plan; una di apply per ogni tenant, limitata al suo resource group."),
+    ("MCP", "Model Context Protocol: protocollo aperto con cui un agente AI usa strumenti e dati esterni.",
+     "Azure MCP Server dà a Copilot accesso ad Azure, con le credenziali di chi lo avvia."),
+    ("OIDC", "OpenID Connect: standard per dimostrare un'identità con token firmati e a scadenza.",
+     "GitHub Actions ottiene un token Azure senza secret salvati (federazione delle identità)."),
+    ("Plan / What-If", "L'anteprima di un cambiamento: cosa verrà creato, modificato o cancellato, prima di farlo.",
+     "terraform plan e ARM What-If sullo stesso resource group, letti dai gate."),
+    ("Platform Engineering", "Disciplina che costruisce piattaforme interne self-service, con le regole già incluse, per chi sviluppa.",
+     "La piattaforma decide cosa arriva in Azure, non chi scrive il codice."),
+    ("Replace  -/+", "Un cambiamento che non si applica sul posto: la risorsa viene cancellata e ricreata.",
+     "Rinominare lo Storage di Sales: con dei dati dentro, vuol dire perderli."),
+    ("Tenant", "Un cliente o un gruppo isolato che condivide la stessa piattaforma. In Azure è anche la directory Entra ID.",
+     "Un team (Sales, Operations) con il suo resource group, state, identità ed environment."),
+], key=lambda w: w[0].lower())
+WORD_NOTES = [
+    """Le parole, prima metà. Non le leggo: sono qui perché in sala ci sono profili diversi, e chi fa sviluppo applicativo non deve perdersi al minuto 15. Il deck completo ha un glossario più lungo in fondo.
+- Canary: il nome viene dal canarino nelle miniere, che segnalava il gas prima che arrivasse ai minatori. Qui il canarino è un intero team.
+- Su Environment GitHub mi fermo un secondo: è la parte meno conosciuta di GitHub Actions ed è il cuore dell'approvazione umana nella demo.
+- MI: da qui in avanti uso la sigla. Managed Identity vuol dire niente password da ruotare e niente secret nel repository.""",
+    """Seconda metà. Due parole hanno un significato diverso da quello che vi aspettate, e le dico ad alta voce.
+- Tenant: per chi lavora su Azure "tenant" è la directory Entra ID. Qui no: è un team. È una scelta di linguaggio da piattaforma interna, e la dichiaro subito per non sembrare di barare più avanti.
+- Replace: è la parola chiave della demo. Su una VM è fastidioso, su uno Storage con dei dati è una perdita di dati.
+- Plan e What-If sono la stessa idea in due mondi: Terraform confronta codice, state e Azure; ARM confronta il template con quello che esiste in Azure. Due motori diversi, e lo sfrutteremo.""",
+]
+for n, half in enumerate((WORDS[:6], WORDS[6:])):
+    s = new("Solo titolo", f"Le parole di questa sessione ({n + 1}/2)", WORD_NOTES[n], mins=0.75)
+    for i, (term, general, here) in enumerate(half):
+        r_, c = divmod(i, 2)
+        x, y = 0.45 + c * 6.3, 1.6 + r_ * 1.62
+        b = box(s, x, y, 6.1, 1.5, [(term, {"size": 17, "bold": True, "color": RED}),
+                                    (general, {"size": 14}),
+                                    ("**Qui:** " + here, {"size": 14, "color": GREY})],
+                fill=LIGHT, fg=INK, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        b.text_frame.margin_left = b.text_frame.margin_right = Inches(0.15)
+
 # ---------------------------------------------------------------- Act 1
 section(1, "Lo scope sbagliato, eseguito correttamente", "Due post-mortem pubblici, nessun agente coinvolto", """
-[2:30] Prima di parlare di AI, due incidenti senza AI. Il problema esisteva già.
+[2:30] «Prima di parlare di AI, due incidenti in cui l'AI non c'entra niente.» Il problema esisteva già: l'agente lo accelera, non lo inventa.
 """)
 
 s = new("Due colonne", "Atlassian, aprile 2022", """
-[2:30–5:00] Atlassian.
-- Script di manutenzione per rimuovere un'app legacy (Insight). Riceve gli ID dei siti, non dell'app.
-- Lo script fa esattamente quello che gli è stato chiesto: cancellazione permanente.
-- 883 siti, 775 clienti, fino a 14 giorni per tornare online.
-- Il PIR dice: nessun cross-check degli ID. Azioni: soft delete ovunque, staged rollout, rollback testato.
-- Immagine: si voleva colpire il quadratino bianco, la cornice rossa ha preso l'isolato.
+[2:30–5:00] Atlassian, raccontato come una storia e non come un elenco.
+- Aprile 2022: un team deve dismettere un'app legacy, Insight. Lo script di manutenzione è corretto e fa esattamente il suo lavoro: cancella in modo permanente gli oggetti di cui riceve gli ID.
+- Il problema è l'input. Invece degli ID dell'app riceve gli ID dei siti dei clienti. Tutto il resto funziona perfettamente.
+- Il dettaglio che colpisce: la cancellazione avviene tra le 07:38 e le 08:01 UTC. Ventitré minuti per cancellare 883 siti; per alcuni clienti, fino a 14 giorni per tornare online.
+- Il PIR non dice «lo script aveva un bug». Dice che nessuno ha verificato se quegli ID fossero dell'app o del sito. Mancava un controllo sullo scope, non sulla sintassi.
+- Le azioni correttive sono tutte di piattaforma: soft delete ovunque, staged rollout, rollback testato. Nessuna è «scrivere script migliori».
+- L'immagine: si voleva colpire il quadratino bianco, la cornice rossa ha preso l'isolato.
 """)
 fill_text(ph(s, 1).text_frame, [
     "Uno script doveva rimuovere un'app legacy",
@@ -244,12 +395,13 @@ picture(s, "wrong-scope.jpg", 6.75, 1.63, w=6.08)
 source(s, "atlassian.com/engineering/post-incident-review-april-2022-outage")
 
 s = new("Solo titolo", "Azure DevOps, maggio 2023", """
-[5:00–7:30] Azure DevOps, South Brazil.
-- Una PR enorme di migrazione SDK. Dentro, un refuso: "cancella lo snapshot" diventa "cancella il server SQL".
-- Il canary c'era! Ring 0 interno: nessuno snapshot abbastanza vecchio, quindi nessun effetto.
-- Ring 1 South Brazil: condizione presente, 17 database di produzione cancellati, circa 10 ore.
-- Messaggio: il canary riduce il raggio, ma non sostituisce il controllo sull'effetto. Tra le correzioni: resource lock.
-- Teniamo a mente il lock: lo ritroveremo nella demo.
+[5:00–7:30] Azure DevOps, maggio 2023. È il caso più vicino a noi: è Azure, ed è un'organizzazione che il canary ce l'aveva.
+- Una PR molto grande: migrazione dei pacchetti da Microsoft.Azure.Management a Azure.ResourceManager. Il tipo di PR che si approva con fiducia, perché «è solo una migrazione di SDK».
+- Dentro c'è un refuso: il job che doveva cancellare un database snapshot adesso cancella l'Azure SQL Server che lo ospita.
+- Ring 0, interno: non c'erano snapshot abbastanza vecchi da far scattare il job. Il canary è passato verde senza mai incontrare la condizione pericolosa.
+- Ring 1, South Brazil: la condizione c'è. Diciassette database di produzione, circa dieci ore di disservizio.
+- Lo dico ad alta voce: il canary riduce il raggio d'azione, non verifica l'effetto. Se il ring 0 non contiene il caso critico, non ti protegge.
+- Tra le correzioni di Microsoft c'è il resource lock sui server SQL di produzione. Tenetelo a mente: nella demo il lock c'è, e un delete lanciato a mano lo fermerà Azure stesso, fuori dalla pipeline.
 """)
 steps = [("PR enorme\nmigrazione SDK", NAVY), ("Refuso:\ndelete DB → delete SQL Server", NAVY),
          ("Ring 0 interno\nnessuno snapshot → OK", GREEN), ("Ring 1 South Brazil\n17 DB cancellati, ~10 h", RED)]
@@ -267,12 +419,12 @@ label(s, 0.6, 4.4, 12, 1.6, [
 source(s, "status.dev.azure.com/_event/392143683/post-mortem")
 
 s = new("Solo titolo", "Lo schema comune", """
-[7:30–9:00] Lo schema.
-- 1: lo scope reale è più grande di quello percepito.
-- 2: tutto è sintatticamente valido; validate e review del diff non vedono l'effetto.
-- 3: nessun livello indipendente tra il comando e l'effetto irreversibile.
-- Frase chiave: il problema non è chi scrive il cambiamento, è cosa lo lascia passare.
-- Ponte: e se a scriverlo è un agente che lavora dieci volte più veloce?
+[7:30–9:00] Qui tiro le fila, lentamente: è la tesi dell'intera sessione.
+- In entrambi i casi nessuno ha sbagliato la sintassi. Lo script di Atlassian e la PR di Azure DevOps erano codice valido, revisionato, testato. I test verificano che il codice faccia quello che dice, non che quello che dice sia giusto.
+- Chi approvava percepiva uno scope più piccolo di quello reale: l'app invece del sito, il database invece del server.
+- E tra il comando e l'effetto irreversibile non c'era nessun livello indipendente in grado di dire no.
+- Frase da dire guardando la sala: il problema non è chi scrive il cambiamento. È cosa lo lascia passare.
+- Ponte: adesso al posto della persona mettete un agente, che scrive dieci volte più velocemente e non si stanca mai di aprire PR.
 """)
 cols = [("Scope più ampio del previsto", "Sito invece di app, server invece di database"),
         ("Sintassi valida, effetto distruttivo", "Il codice passa i test; l'effetto si vede solo nel piano"),
@@ -287,84 +439,103 @@ box(s, 0.6, 5.2, 12.1, 0.9, "Il problema non è chi scrive il cambiamento. È co
 
 # ---------------------------------------------------------------- Act 2
 section(2, "Ora il cambiamento lo scrive un agente", "Stesso schema, più velocità", """
-[9:00] Stesso schema, attore diverso.
+[9:00] Stesso schema, attore diverso. Una frase per rassicurare: non è una sessione contro gli agenti. Li uso ogni giorno, e li ho usati anche per costruire questo laboratorio.
 """)
 
 s = new("Solo titolo", "Casi agentici: stesso schema", """
-[9:00–11:00] Tre casi, una frase ciascuno.
-- PocketOS: l'agente trova un token in un file non correlato, il token può fare tutto, una chiamata API cancella volume e backup. Le credenziali raggiungibili sono il perimetro reale.
-- Replit: code freeze dichiarato in chat, l'agente cancella comunque il DB. Un'istruzione non è un controllo.
-- Amazon Q: prompt distruttivo entrato via contributo esterno nell'estensione. Anche la supply chain dell'agente è superficie d'attacco.
-- Non sono storie contro gli agenti: sono storie di piattaforme senza confini.
+[9:00–11:00] Tre casi in due minuti, tre modi in cui si rompe il perimetro di un agente: le credenziali che trova, le istruzioni che ignora, il codice con cui è costruito.
+- PocketOS, aprile 2026. L'agente lavora in staging e trova un token in un file che non c'entrava niente. Il token aveva più permessi del previsto: con una sola chiamata API spariscono il volume con il database di produzione e i backup. L'agente non ha forzato niente: ha usato quello che trovava. Le credenziali raggiungibili sono il suo perimetro reale.
+- Replit, luglio 2025. Il fondatore di SaaStr aveva dichiarato un code freeze, in chat. L'agente ha cancellato comunque il database di produzione. Un'istruzione in linguaggio naturale non è un controllo: è una richiesta.
+- Amazon Q, luglio 2025. Qui l'agente è la vittima: un token GitHub con permessi troppo ampi, nella configurazione di build, ha permesso di inserire codice malevolo nell'estensione per VS Code, finito in automatico nella release 1.84.0. Non ha fatto danni solo perché conteneva un errore di sintassi. Lo dico così: siamo stati fortunati, non protetti.
+- Chiusura: nessuna di queste è una storia contro gli agenti. Sono storie di piattaforme senza confini.
 """)
 rows = [("Caso", "Cosa è successo", "Lezione"),
         ("PocketOS\naprile 2026", "Un agente in staging usa un token trovato in un file non correlato: una chiamata API cancella database e backup",
          "Le credenziali raggiungibili sono il perimetro reale dell'agente"),
         ("Replit\nluglio 2025", "Durante un code freeze dichiarato, l'agente cancella il database di produzione",
          "Un'istruzione in linguaggio naturale non è un controllo"),
-        ("Amazon Q\nluglio 2025", "Un prompt distruttivo entra nell'estensione tramite un contributo esterno (AWS-2025-015)",
+        ("Amazon Q\nluglio 2025", "Un token GitHub con permessi eccessivi fa entrare codice malevolo nella release; non parte solo per un errore di sintassi (AWS-2025-015)",
          "La supply chain dell'agente è superficie d'attacco")]
-tbl = s.shapes.add_table(4, 3, Inches(0.5), Inches(1.7), Inches(12.3), Inches(4.4)).table
-for c, w in enumerate((2.2, 6.0, 4.1)):
-    tbl.columns[c].width = Inches(w)
-for r_, row in enumerate(rows):
-    for c, val in enumerate(row):
-        cell = tbl.cell(r_, c)
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = RED if r_ == 0 else (LIGHT if r_ % 2 else WHITE)
-        tf = cell.text_frame
-        tf.clear()
-        tf.word_wrap = True
-        run = tf.paragraphs[0].add_run()
-        run.text = val
-        run.font.size = Pt(16 if r_ == 0 else 15)
-        run.font.bold = r_ == 0 or c == 0
-        run.font.color.rgb = WHITE if r_ == 0 else INK
-        cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+table(s, rows, (2.2, 6.0, 4.1), row_h=1.1)
 source(s, "The Register, 27/04/2026 · AWS Security Bulletin AWS-2025-015 · dettagli in docs/case-study.md")
 
-s = new("Due colonne con sottotitoli", "Copilot: cosa copre e cosa no", """
-[11:00–14:00] Onestà su Copilot.
-- Il coding agent ha già protezioni serie: branch propri, non approva né unisce le sue PR, workflow da approvare, firewall.
-- La regola "chi chiede la PR non la approva" funziona solo se la branch protection richiede almeno un'approvazione. Nel mio repo era a zero: regola inattiva.
-- In VS Code agent mode i comandi chiedono conferma, ma l'auto-approvazione è un'impostazione. E il terminale dell'agente è il MIO terminale, con il MIO az login.
-- Le istruzioni del repo (.github/copilot-instructions.md) le uso e le mostro: guidano, non bloccano.
-- Ciò che Copilot non può sapere è il contesto della piattaforma: quale tenant, update o replace, quali credenziali. È lavoro del Platform Engineering.
+s = new("Solo titolo", "Copilot: cosa sa e cosa non decide", """
+[11:00–14:00] La slide in cui devo essere più onesto su Copilot.
+- Prima colonna, veloce: GitHub ha fatto un buon lavoro sul coding agent. Però c'è un dettaglio che quasi nessuno nota: «chi chiede la PR non può approvarla» vale solo se la branch protection richiede almeno un'approvazione. Con zero approvazioni richieste la regola non scatta mai.
+- In VS Code l'agent mode chiede conferma prima dei comandi, ma l'auto-approvazione è un'impostazione. E il terminale dell'agente è il mio terminale: se ho fatto az login, l'agente ha i miei permessi. È esattamente lo schema di PocketOS. Nella demo il terminale dell'agente non ha az login: è una precauzione, non un confine, perché gira comunque con il mio utente.
+- Seconda colonna, ed è un cambio di idea mio: nella prima versione questa colonna si intitolava «Cosa non può sapere». Non reggeva più. Copilot sa benissimo che rinominare uno Storage forza un replace: lo trova nella documentazione del provider. Con Azure MCP vede le policy assegnate e i ruoli. E nel mio repo le istruzioni gli chiedono proprio di segnalarlo.
+- Terza colonna: la domanda si è spostata da cosa sa a cosa decide. Sapere che è un replace non dà il diritto di farlo, né a un agente né a un collega junior.
+- Nel lab, per i file dei team, l'approvazione umana obbligatoria non sta sulla PR: sta sull'environment del tenant, dove chi lancia il rollout non può approvarlo. Sulla PR serve solo quando tocca i file della piattaforma, che hanno un code owner diverso da me.
 """)
-fill_text(ph(s, 1).text_frame, ["Cosa Copilot fa già"], size=20, color=RED)
-fill_text(ph(s, 2).text_frame, [
-    "Coding agent: lavora su branch propri",
-    "Non approva né unisce le proprie PR",
-    "I workflow sulle sue PR richiedono approvazione",
-    "Agent mode in VS Code: conferma dei comandi in terminale",
-    "Istruzioni di repository: guida il comportamento",
-], size=17)
-fill_text(ph(s, 3).text_frame, ["Cosa non può sapere"], size=20, color=RED)
-fill_text(ph(s, 4).text_frame, [
-    "Qual è il tenant giusto per quella risorsa",
-    "Se un cambio è un update o un **replace** in Azure",
-    "Quanto valgono le credenziali del **tuo** terminale",
-    "Se l'approvazione è davvero obbligatoria (0 reviewer = regola spenta)",
-    "**Istruzioni = guida. Gate = controllo.**",
-], size=17)
+columns(s, [
+    ("Protezioni già presenti", NAVY, [
+        "Coding agent: branch propri, non approva né unisce le sue PR",
+        "I workflow sulle sue PR vanno approvati",
+        "Agent mode: conferma dei comandi, ma l'auto-approvazione si attiva",
+        "Istruzioni di repository: guidano il comportamento"]),
+    ("Cosa può sapere oggi", TEAL, [
+        "Update o replace: dalla doc del provider o leggendo un plan",
+        "Lo stato reale: risorse, policy, ruoli, con Azure MCP Server",
+        "Le regole della piattaforma, se legge il gate nel repo",
+        "Per vedere Azure servono credenziali: di chi?"]),
+    ("Cosa non deve decidere", RED, [
+        "Se il cambio arriva in produzione",
+        "Con quali credenziali agire",
+        "Chi approva (0 reviewer = regola spenta)",
+        "Se cambiare le protezioni che lo bloccano"]),
+])
+box(s, 0.45, 5.65, 12.4, 0.75, "Sapere non è decidere.  Istruzioni = guida · Gate = controllo.",
+    fill=LIGHT, fg=RED, size=20, bold=True)
+
+# ---------------------------------------------------------------- MCP
+s = new("Solo titolo", "Azure MCP Server: contesto, non giudizio", """
+È la domanda che mi sono fatto preparando la sessione: MCP aiuta o complica la governance? La risposta onesta è: tutte e due.
+- MCP è un protocollo: il server espone strumenti, l'intelligenza resta nel modello. Ma «è solo un connettore» è riduttivo. Porta contesto, cioè lo stato reale di Azure, e conoscenza già confezionata: documentazione del provider, regole IaC. È per questo che la slide precedente è cambiata.
+- Cosa mi ha sorpreso leggendo la documentazione: le mani sono poche. I tool di Policy e RBAC sono in sola lettura. Sullo Storage crea account e carica blob, ma non c'è un tool per cancellarlo. E il comando az lo genera soltanto: a eseguirlo è il terminale, con le credenziali del terminale. Il rischio vero resta lì.
+- Le credenziali: in locale usa quelle di chi lo avvia, tipicamente il vostro az login. Per il cloud agent di Copilot la configurazione ufficiale, azd coding-agent config, crea una managed identity dedicata con ruolo Reader di default. È lo stesso principio del lab: un'identità per ogni ruolo, e all'agente la più piccola.
+- Cosa complica: ogni scrittura fatta via MCP salta plan, gate e approvazione. E il server cambia in fretta: la 3.0 è di ottobre 2026 e l'esempio ufficiale usa @azure/mcp@latest. Dopo Amazon Q, «latest» su uno strumento con accesso ad Azure dovrebbe far alzare un sopracciglio.
+- Consiglio pratico: versione fissata, --read-only, solo i namespace che servono.
+- Chiusura: MCP migliora la proposta. Non sostituisce il gate.
+""", mins=2)
+flow = [("Copilot", "il modello sceglie quale tool chiamare", NAVY),
+        ("VS Code", "client MCP: mostra la chiamata e chiede conferma", VIOLET),
+        ("Azure MCP Server", "traduce in chiamate Azure", TEAL),
+        ("Azure + RBAC", "con le credenziali di chi lo avvia", RED)]
+for i, (h, b, c) in enumerate(flow):
+    x = 0.45 + i * 3.12
+    box(s, x, 1.6, 3.0, 0.7, h, fill=c, size=17, bold=True, shape=MSO_SHAPE.CHEVRON if i else MSO_SHAPE.PENTAGON)
+    label(s, x + 0.1, 2.35, 2.8, 0.7, b, size=13, color=GREY, align=PP_ALIGN.CENTER)
+columns(s, [
+    ("Cosa porta", TEAL, [
+        "Stato reale: risorse, policy assegnate, ruoli",
+        "Conoscenza curata: doc del provider, regole IaC",
+        "Terraform: conftest sulla policy library AVM",
+        "Read-only e filtro per namespace o singolo tool"]),
+    ("Cosa non risolve", RED, [
+        "Usa le credenziali di chi lo avvia: az login o MI",
+        "Policy e RBAC solo in lettura; crea Storage e carica blob",
+        "Il comando az lo genera: lo esegue il tuo terminale",
+        "I tool cambiano tra versioni: fissare la versione"]),
+], y=3.0, h=2.5, size=15)
+box(s, 0.45, 5.7, 12.4, 0.7, "Porta contesto, non giudizio. Quello che scrive in Azure non passa da plan, gate e approvazione.",
+    fill=LIGHT, fg=RED, size=17, bold=True)
+source(s, "learn.microsoft.com/azure/developer/azure-mcp-server · Azure MCP Server 3.0, ottobre 2026")
 
 # ---------------------------------------------------------------- Act 3
 section(3, "La piattaforma decide, non chi scrive", "Il laboratorio: github.com/carlosacchi/wpc-2026", """
-[14:00] Passiamo dal problema alla piattaforma. Tutto quello che vedete è nel repo pubblico e gira davvero in Azure.
+[14:00] Da qui in avanti è tutto codice vero: repository pubblico, gira davvero su Azure, e ogni run che vedrete ha un numero che potete cercare. Il QR è nell'ultima slide.
 """)
 
 s = new("Solo titolo", "Tenant simulati, confini reali", """
-[14:00–16:30] Il lab.
-- Una subscription, una directory: lo dico subito. È il caso di una piattaforma interna multi-team, o di un solo team con ruoli separati.
-- Ogni tenant è un resource group con: il suo Storage, il suo container di state, la sua identità di apply, il suo environment GitHub.
-- La MI di apply di Sales non può toccare Operations né lo state di Operations.
-- La MI di plan è Reader, con un ruolo custom solo per il what-if.
-- Su ogni RG: policy Deny per lo Storage pubblico, DenyAction sul delete, lock CanNotDelete.
-- La mappa tenant → RG sta nel gate, non nei file che l'agente modifica.
+[14:00–16:30] Il lab. Lo dico subito, prima che me lo chieda qualcuno: una sola subscription, una sola directory Entra, e i tenant sono resource group. È il caso di una piattaforma interna con più team, o di un solo team che separa chi scrive, chi approva e chi gestisce.
+- Ogni tenant ha quattro cose sue: resource group con lo Storage, container di state, identità di apply, environment GitHub. Se l'identità di apply di Sales prova a toccare Operations, Azure risponde 403: non è una regola del gate, è RBAC.
+- Il resource group sta anche nel file del team, quindi l'agente può cambiarlo. Ma il gate confronta il piano con la sua mappa tenant → resource group e risponde DENY: la mappa vive nel codice della piattaforma, non in quello del team.
+- Un'onestà in più: l'identità di plan è una sola e oltre alla lettura può scrivere lo state di entrambi i tenant, perché il plan prende il lock sullo state. È una semplificazione del lab: in produzione la separerei per tenant.
+- I nomi dei resource group sono vincolati a wpc-* e mai wpc-2026: nella subscription ci sono anche carichi reali, e bootstrap, workload e gate rifiutano tutto il resto.
 """)
 box(s, 0.45, 1.6, 12.4, 4.85, fill=None, line=GREY)
-label(s, 0.6, 1.62, 6, 0.4, "Subscription · una directory Entra", size=13, color=GREY)
-cards = [("wpc-2026 · piattaforma", VIOLET, ["Storage di state (lock)", "Container tfstate-<tenant>", "MI plan: Reader + what-if",
+label(s, 0.75, 1.68, 6, 0.4, "Subscription · una directory Entra", size=13, color=GREY)
+cards = [("wpc-2026 · piattaforma", VIOLET, ["Storage di state (lock)", "Container tfstate-<tenant>", "MI plan: lettura, what-if, state",
                                             "Policy: Deny + DenyAction"]),
          ("wpc-2026-sales · ring 0", TEAL, ["Storage wpc26salesb0b966", "MI apply sales: solo questo RG", "Environment «sales»",
                                            "Lock CanNotDelete + DenyAction"]),
@@ -375,17 +546,16 @@ for i, (h, c, items) in enumerate(cards):
     box(s, x, 2.1, 3.8, 0.6, h, fill=c, size=16, bold=True)
     box(s, x, 2.7, 3.8, 2.6, ["• " + t for t in items], fill=LIGHT, fg=INK, size=17, align=PP_ALIGN.LEFT,
         anchor=MSO_ANCHOR.TOP)
-box(s, 0.75, 5.55, 12.0, 0.7, "La mappa tenant → resource group sta nel gate della piattaforma, non nei file che l'agente modifica",
+box(s, 0.75, 5.55, 12.0, 0.7, "La mappa tenant → resource group sta nel gate della piattaforma, non nei file dei team",
     fill=WHITE, fg=RED, size=16, bold=True, line=RED)
 
 s = new("Solo titolo", "Il flusso di un ring", """
-[16:30–19:00] Il flusso. Seguite i colori delle identità.
-- PR: la CI validate gira senza credenziali Azure.
-- Plan: Terraform plan salvato E Bicep what-if sullo stesso RG. Due motori, due preview.
-- Due gate: devono dire ALLOW entrambi. Se uno dice DENY non esiste artefatto e l'environment non viene mai raggiunto.
-- Approvazione: environment del tenant, revisore obbligatorio, chi lancia non può approvare, niente bypass admin.
-- Apply: identità del tenant, e solo il piano di QUESTA run: stesso commit, stesso sha256.
-- Verify: Storage privato, lock, policy, nessun drift. Solo allora parte il ring successivo.
+[16:30–19:00] Il flusso di un ring. Invito a seguire i colori: ogni colore è un'identità diversa, e la domanda giusta in ogni momento è «chi sta agendo adesso?».
+- La CI sulla PR gira senza credenziali Azure, ed è voluto: una PR, anche scritta da un agente, non deve poter toccare Azure.
+- Il plan produce due anteprime, terraform plan salvato e Bicep What-If sullo stesso resource group. Perché due? Perché sbagliano in modo diverso: lo vediamo tra poco con la rinomina.
+- I gate devono rispondere PASS tutti e due. Se uno solo dice DENY non nasce l'artefatto, e senza artefatto l'environment non viene raggiunto: il revisore non riceve nemmeno la notifica. Non si può approvare per sbaglio qualcosa che non esiste.
+- L'apply verifica che il piano sia quello generato in questa run, da questo commit, con lo stesso sha256: non si può approvare un piano e applicarne un altro.
+- Un'osservazione che mi piace fare: il gate non è un'AI. Sono meno di 200 righe di JavaScript, leggibili in dieci minuti. È una scelta: un controllo che decide deve essere più semplice di ciò che controlla.
 """)
 flow = [("PR", "CI validate\nsenza credenziali", GREY), ("Plan", "terraform plan\n+ Bicep what-if", VIOLET),
         ("Gate ×2", "DENY: delete, replace,\nfuori tenant, rinomina", RED), ("Approva", "environment del tenant\nno self-review", ORANGE),
@@ -394,7 +564,7 @@ for i, (h, b, c) in enumerate(flow):
     x = 0.45 + i * 2.1
     box(s, x, 1.9, 1.9, 0.75, h, fill=c, size=17, bold=True, shape=MSO_SHAPE.CHEVRON if i else MSO_SHAPE.PENTAGON)
     label(s, x, 2.75, 1.9, 1.1, b.split("\n"), size=13, align=PP_ALIGN.CENTER)
-lanes = [("Chi agisce", INK, ["Copilot + persona", "MI plan (Reader)", "MI plan", "Revisore umano", "MI apply sales", "MI plan"])]
+lanes = [("Chi agisce", INK, ["Copilot + persona", "MI plan", "MI plan", "Revisore umano", "MI apply sales", "MI plan"])]
 for i, who in enumerate(lanes[0][2]):
     box(s, 0.55 + i * 2.1, 4.05, 1.7, 0.55, who, fill=LIGHT, fg=INK, size=12)
 label(s, 0.45, 4.7, 12.5, 0.4, "Ring 0 sano → Ring 1 (operations), con gli stessi passi e le sue identità", size=16, color=RED, bold=True)
@@ -405,9 +575,10 @@ code(s, 0.45, 5.2, 12.4, 1.25, [
 ], size=12)
 
 s = new("Vuota", "Cinque livelli, ognuno presuppone che il precedente fallisca", """
-[19:00–21:00] Difesa a livelli. Ogni livello presuppone che il precedente possa fallire, anche se chi fallisce è una persona che modifica il codice.
-- 1 gate in CI, 2 approvazione umana, 3 identità per tenant, 4 Azure Policy DenyAction, 5 lock e prevent_destroy.
-- I livelli 4 e 5 vivono in Azure, fuori dalla pipeline: funzionano anche se qualcuno aggira GitHub. Come la correzione di Azure DevOps.
+[19:00–21:00] La difesa a livelli. Ogni livello presuppone che il precedente possa fallire, anche quando a sbagliare è una persona che modifica il codice.
+- 1 e 2 vivono in GitHub: gate e approvazione. Il 3 è l'identità: anche con tutto il resto aggirato, l'apply di Sales non può toccare Operations. 4 e 5 vivono in Azure: policy e lock funzionano anche se qualcuno passa dal portale o da az, completamente fuori dalla pipeline. È la stessa correzione scelta da Azure DevOps.
+- Per chi conosce Terraform: prevent_destroy l'ho messo sullo state e sui resource group dei tenant, non sullo Storage dei workload. Lì Terraform rifiuterebbe il piano prima ancora del gate, e nella demo non vedreste il gate lavorare.
+- Se qualcuno chiede perché così tanti livelli: perché ognuno ha un buco. Il gate è codice nello stesso repository, protetto solo dalla review del suo code owner; l'approvazione dipende da una persona attenta; la policy da come è scritta. Perché passi un errore, i buchi devono allinearsi tutti.
 """)
 picture(s, "defense-layers.jpg", 0, 0, w=13.333)
 label(s, 8.85, 0.45, 4.3, 1.4, "Cinque livelli, ognuno presuppone che il precedente fallisca", size=24, color=WHITE, bold=True)
@@ -415,7 +586,7 @@ layers = [("Gate in CI", "plan + what-if: niente delete, replace, fuori tenant")
           ("Approvazione umana", "environment del tenant, no self-review"),
           ("Identità per tenant", "apply limitato al proprio RG e al proprio state"),
           ("Azure Policy DenyAction", "nessun delete degli Storage del lab"),
-          ("Lock + prevent_destroy", "CanNotDelete sui RG dei tenant e sullo state")]
+          ("Resource lock", "CanNotDelete sui RG dei tenant e sullo state")]
 for i, (h, b) in enumerate(layers):
     y = 2.0 + i * 0.95
     number(s, 8.85, y, i + 1, d=0.6, fill=[TEAL, BLUE, VIOLET, RED, RED][i])
@@ -423,10 +594,11 @@ for i, (h, b) in enumerate(layers):
     label(s, 9.55, y + 0.32, 3.7, 0.6, b, size=13, color=CODE_FG)
 
 s = new("Solo titolo", "Una rinomina, due rischi", """
-[21:00–23:00] La slide tecnica più importante.
-- Terraform: cambiare il nome forza la sostituzione. -/+ vuol dire: cancello quello vecchio e ne creo uno nuovo. Su uno Storage con dati, è una perdita di dati.
-- Bicep in modalità incrementale non cancella: crea il nuovo e lascia l'originale orfano, fuori dal template. Sembra innocuo, ma ora hai due Storage e i dati sono in quello che nessuno gestisce.
-- Il gate legge entrambi i preview e dice DENY a entrambi. terraform validate e bicep build invece passano.
+[21:00–23:00] La slide tecnica più importante: chi capisce questa, capisce la demo.
+- Terraform: il nome di uno Storage account in Azure non si può cambiare. Terraform lo sa e pianifica un replace: -/+, cancella il vecchio e crea il nuovo. Con dei dati dentro, vuol dire perderli. E terraform validate è verde: la sintassi è perfetta.
+- Bicep, ed è la parte che sorprende anche chi usa Azure da anni: in modalità incrementale ARM non cancella mai niente. Crea il nuovo Storage e lascia l'originale fuori dal template. Sembra la versione sicura, ma adesso ci sono due Storage, i dati stanno in quello che nessun codice gestisce più, e prima o poi qualcuno lo cancellerà credendolo orfano.
+- Stessa riga cambiata, due rischi diversi: perdita di dati da una parte, risorsa orfana dall'altra. Per questo il gate legge entrambe le anteprime.
+- Limite da dichiarare: la regola «Create più Storage ignorato uguale rinomina» funziona nel lab, dove ogni tenant ha un solo Storage. Non è una regola generale.
 """)
 code(s, 0.45, 1.65, 6.1, 3.9, [
     ("# module.storage.azurerm_storage_account.this", CODE_DIM),
@@ -456,14 +628,19 @@ box(s, 0.45, 5.75, 12.4, 0.7, "validate e bicep build passano entrambi. La decis
 
 # ---------------------------------------------------------------- Act 4
 section(4, "Demo", "Copilot Chat in VS Code → PR → rollout governato", """
-[23:00] Demo. Runbook: docs/session/demo-runbook.md. Se qualcosa non risponde entro 60 secondi, passo alle run registrate (slide di backup nascoste).
+[23:00] Due cose prima di iniziare. La demo è live: se un passo non risponde entro un minuto passo alla registrazione, senza drammi. E chi lancia il rollout non può approvarlo: per questo c'è un secondo account, il revisore, su un altro dispositivo.
+Runbook: docs/session/demo-runbook.md.
 """)
 
 s = new("Solo titolo", "Cosa guardare durante la demo", """
-[23:00–38:00] Slide di orientamento: la lascio sullo schermo nei momenti di attesa della CI.
-- 1 ~3 min, 2 ~3 min, 3 ~3 min, 4 ~4 min, 5 ~1 min. Margine 1 min.
-- Nei tempi di attesa: commentare le identità (chi sta agendo adesso?).
-- Se Copilot segnala da solo il rischio della rinomina: bene, lo dico e procedo con la modifica esplicita. È la dimostrazione che l'istruzione guida, ma il gate decide comunque.
+[23:00–38:00] Questa slide resta sullo schermo durante le attese della CI, che non sono poche: ogni job impiega qualche minuto.
+- Tempi indicativi: passi 1, 2 e 3 tre minuti ciascuno, passo 4 quattro minuti, passo 5 uno. Un minuto di margine.
+- Durante le attese commento chi sta agendo: nella PR nessuna credenziale, nel plan l'identità di plan, nell'apply quella di Sales, nel delete finale io come Owner.
+- Passo 1: se Copilot segnala da solo che la rinomina forza un replace, è merito delle istruzioni del repo. Lo dico e confermo comunque la modifica: la demo mostra che il controllo regge anche quando chi propone insiste, persona o agente.
+- Passo 2: indico la riga «forces replacement» e le due righe DENY. Poi faccio notare che il revisore non ha ricevuto nessuna richiesta: non c'è niente da approvare.
+- Passo 4: mostro che io non posso approvare, poi approva il revisore. L'apply cambia un tag: 0 added, 1 changed, 0 destroyed. Il ring 1 lo racconto a parole: in sala lancio solo il canary, con rings=all partirebbe Operations con la sua approvazione.
+- Passo 5: delete dello Storage dal terminale fuori da VS Code, come Owner della subscription. Risposta attesa: RequestDisallowedByPolicy; se risponde prima il lock, ScopeLocked. In entrambi i casi non si cancella niente, e non c'è nessuna pipeline di mezzo.
+- Se avanza tempo: nella prova generale del 10 novembre lo script di reset si è fermato a metà per un bug, corretto il giorno dopo. Un buon esempio del perché si prova tutto, anche il rollback.
 """)
 demo = [("Copilot rinomina lo Storage di Sales", "PR verde: validate non vede il problema"),
         ("Rollout: due DENY", "plan -/+ e what-if orfano · nessun artefatto, nessuna approvazione"),
@@ -490,15 +667,15 @@ code(s, 8.0, 1.7, 4.85, 3.6, [
 
 # ---------------------------------------------------------------- Act 5
 section(5, "Rollback, limiti, takeaway", "Tornare indietro senza cancellare", """
-[38:00] Ultima parte: come rifare tutto domani, e cosa NON dimostra il lab.
+[38:00] Ultima parte, la più onesta: come si rifà tutto domani mattina, e cosa questo lab non dimostra.
 """)
 
 s = new("Solo titolo", "Rollback = roll-forward", """
-[38:00–40:00] Rollback.
-- Non si torna indietro cancellando: si riporta in produzione l'ultima configurazione nota e buona, con gli stessi gate e la stessa approvazione.
-- demo/baseline è versionata. npm run demo:reset apre la PR di ripristino, attende la CI, fa il merge e lancia il rollout.
-- Idempotente: se tutto è allineato non cambia nulla e l'apply viene saltato. Così ho preparato questa sala.
-- Il teardown è break-glass: disattivo la DenyAction, tolgo il lock, cancello. Tre passi deliberati, con approvazione.
+[38:00–40:00] Il rollback. Dopo una demo andata male la tentazione è «cancello e ricreo». Qui il rollback non cancella niente.
+- La baseline è versionata in demo/baseline. npm run demo:reset confronta i file dei team con la baseline, apre una PR di ripristino, aspetta la CI, la unisce e lancia il rollout su tutti i ring, con gli stessi gate e la stessa approvazione. Anche tornare indietro è un cambiamento, e passa dallo stesso cancello.
+- È idempotente: se tutto è già allineato non apre nemmeno la PR e l'apply viene saltato. È così che preparo il lab prima di ogni sessione.
+- Precisazione importante: il reset riporta configurazione e tag, non dati. Se il replace fosse passato, nessun roll-forward riporterebbe indietro i blob. Per i dati servono soft delete, backup e ripristini provati, e il lab non li dimostra.
+- Il teardown dopo l'evento è break-glass: disattivo la DenyAction, tolgo il lock, cancello. Tre passi deliberati, approvati e tracciati.
 """)
 rb = [("Baseline versionata", "demo/baseline/", NAVY), ("Cambi in sessione", "file team + tag", GREY),
       ("npm run demo:reset", "PR di ripristino + CI", VIOLET), ("Stesso rollout", "gate + approvazione", ORANGE),
@@ -523,24 +700,28 @@ box(s, 7.35, 3.6, 5.5, 2.5, [("Teardown = break-glass", {"bold": True, "size": 2
     fill=LIGHT, fg=INK, align=PP_ALIGN.LEFT)
 
 s = new("Titolo e contenuto", "Limiti dichiarati", """
-[40:00–41:30] Onestà. Questi limiti li dico io prima che li chieda il pubblico.
-- Il più importante: chi ha ruoli ereditati sulla subscription scavalca tutto. Nel mio lab il revisore era Contributor sulla subscription: l'ho tolto prima di questa sessione. Controllate i vostri.
+[40:00–41:30] Questi limiti li dico io, prima che li trovi qualcuno in sala.
+- Il più importante sono i ruoli ereditati. Chi è Contributor sulla subscription attraversa tutti i tenant, perché RBAC eredita verso il basso. Policy e lock restano, ma la separazione tra team no. Mi è successo: nel mio lab il revisore era Contributor sulla subscription, e l'ho tolto preparando questa sessione. Controllate i vostri.
+- Il canary qui è per team: non c'è traffico da spostare, quindi niente split al 5%.
+- La DenyAction protegge gli Storage che hanno il tag del progetto: chi può cambiare quel tag li fa uscire dalla policy. Il lock resta.
+- Il lab protegge il control plane, non i dati: bloccare la cancellazione dello Storage non impedisce di cancellare i blob dentro.
+- Chi amministra il repository può cambiare branch protection ed environment. Per questo policy e lock stanno in Azure: chi controlla GitHub non li controlla automaticamente.
 """)
 fill_text(ph(s, 1).text_frame, [
-    "**Una directory, una subscription:** isolamento per RG, identità, state e policy. Ruoli ereditati sulla subscription lo scavalcano",
+    "**Una directory, una subscription:** isolamento per RG, identità, state e policy. Ruoli ereditati sulla subscription lo attraversano",
     "**Canary per tenant**, non uno split di traffico",
     "**What-if è un preview:** con ProviderNoRbac non verifica i permessi di scrittura",
-    "**DenyAction copre solo delete:** il replace lo fermano gate e prevent_destroy",
+    "**DenyAction copre solo il delete** degli Storage del progetto: il replace lo ferma il gate",
     "**I gate sono regole didattiche esplicite**, non uno scanner di sicurezza completo",
     "**Chi amministra il repo** può riconfigurare branch protection ed environment",
 ], size=20)
 
 s = new("Solo titolo", "Da portare a casa", """
-[41:30–43:00] Tre frasi. Ripeterle lentamente.
-- La decisione si prende sul piano, non sulla sintassi.
-- Credenziali e approvazioni per tenant: il raggio d'azione è un'architettura, non un'istruzione.
-- Una rete di sicurezza fuori dalla pipeline, perché prima o poi qualcuno la aggira.
-- Chiusura: Copilot accelera. La piattaforma decide.
+[41:30–43:00] Tre frasi, lente. Se il pubblico se ne ricorda una sola, va bene lo stesso.
+- La prima è per chi scrive pipeline: si decide sul piano, non sulla sintassi. Un validate verde non dice niente sull'effetto.
+- La seconda è per chi disegna piattaforme: il raggio d'azione di un agente, o di una persona, è un'architettura di identità, non un'istruzione in un prompt.
+- La terza è per chi la notte vuole dormire: una rete di sicurezza dentro Azure, fuori dalla pipeline, perché prima o poi qualcuno la pipeline la aggira.
+- Pausa, poi la chiusura: «Copilot accelera. La piattaforma decide.»
 """)
 take = [("Decide il piano", "terraform plan e what-if, letti da un gate. Non validate, non la review del diff."),
         ("Confini per tenant", "Identità, state e approvazione per tenant. Il raggio d'azione è architettura."),
@@ -553,7 +734,12 @@ for i, (h, b) in enumerate(take):
 box(s, 0.6, 5.2, 12.1, 0.9, "Copilot accelera. La piattaforma decide.", fill=RED, size=26, bold=True)
 
 s = new("Titolo e contenuto", "Grazie! Codice, demo e fonti", """
-[43:00–45:00] Q&A. Lasciare il QR sullo schermo.
+[43:00–45:00] Lascio il QR sullo schermo per tutto il Q&A: è il modo più semplice per chi vuole rifare la demo.
+Domande probabili, con una risposta breve:
+- «E se l'agente modifica il gate?» Il gate sta nello stesso repository, ma i file della piattaforma (gate, workflow, test, bootstrap, moduli) hanno in CODEOWNERS un proprietario diverso da me: una PR che li tocca resta ferma finché non approva lui, chiunque l'abbia scritta, io o Copilot. I file dei team invece non hanno proprietario, ed è lì che lavora l'agente. E se qualcuno riconfigura GitHub, identità, policy e lock non dipendono dal repository.
+- «Perché non basta Azure Policy?» Perché la policy valuta la singola richiesta, non il piano: non sa che quel delete fa parte di un replace.
+- «Funziona con Azure DevOps?» Il principio sì: environment con approvazioni e controlli, service connection con workload identity federation, lo stesso gate in uno step.
+- «Quanto costa il lab?» Quasi niente: due Storage praticamente vuoti più lo state. Identità e policy non costano.
 """)
 fill_text(ph(s, 1).text_frame, [
     "Repository del lab: **github.com/carlosacchi/wpc-2026**",
@@ -569,6 +755,47 @@ qr_path = HERE / "out/qr-repo.png"
 qr_path.parent.mkdir(parents=True, exist_ok=True)
 qrcode.make(REPO, border=1).save(qr_path)
 s.shapes.add_picture(str(qr_path), Inches(9.6), Inches(2.0), Inches(3.2), Inches(3.2))
+
+# ---------------------------------------------------------------- Appendix: full glossary (not timed)
+GLOSSARY = sorted([
+    ("Platform Engineering", "Team e pratiche che costruiscono una piattaforma interna: i team applicativi arrivano in produzione con regole già incluse."),
+    ("IaC (Infrastructure as Code)", "Infrastruttura descritta in file versionati e applicata da strumenti, non da clic nel portale."),
+    ("Terraform state", "Il file in cui Terraform registra cosa ha creato. Chi può scriverlo può alterare ciò che Terraform crede esista."),
+    ("terraform plan / apply", "plan calcola le differenze tra codice e Azure; apply le esegue. Nel lab l'apply usa solo il piano salvato e approvato."),
+    ("Replace (-/+)", "Il cambio non si può fare sul posto: la risorsa viene cancellata e ricreata. Per uno Storage vuol dire perdere i dati."),
+    ("prevent_destroy", "Regola Terraform che fa fallire ogni piano che distrugge quella risorsa. Nel lab protegge lo state e i RG dei tenant."),
+    ("Bicep", "Linguaggio Microsoft per i template ARM. Nel lab serve solo per il What-If e non viene mai applicato."),
+    ("ARM What-If", "Anteprima di Azure Resource Manager: cosa un template creerebbe, modificherebbe o ignorerebbe."),
+    ("Modalità incrementale", "Deploy ARM/Bicep in cui le risorse assenti dal template restano dove sono: non vengono cancellate."),
+    ("Gate (policy gate)", "Codice in pipeline che legge plan e What-If e risponde PASS o DENY prima di qualsiasi apply."),
+    ("Policy as code", "Regole di governance scritte come codice: versionate, revisionate e testate come il resto."),
+    ("Azure Policy: Deny", "Effetto che rifiuta la creazione o la modifica di risorse non conformi, per esempio uno Storage pubblico."),
+    ("Azure Policy: DenyAction", "Effetto che rifiuta un'azione su risorse esistenti. Nel lab: il delete degli Storage."),
+    ("Resource lock (CanNotDelete)", "Blocco in Azure: la risorsa si può modificare ma non cancellare finché il lock non viene rimosso."),
+    ("RBAC e minimo privilegio", "Ruoli Azure assegnati su uno scope; ogni identità riceve solo i permessi che le servono."),
+    ("Managed Identity (MI)", "Identità Azure senza password, gestita dalla piattaforma. Nel lab: una per il plan, una di apply per ogni tenant."),
+    ("OIDC / federazione", "GitHub Actions riceve un token Azure a tempo, legato a repository, branch o environment. Nessun secret salvato."),
+    ("Environment GitHub", "Destinazione di deploy con regole: revisori obbligatori, niente self-review, solo dal branch main."),
+    ("Branch protection / CODEOWNERS", "Regole per unire una PR: check obbligatori, numero di approvazioni, proprietari dei percorsi."),
+    ("Tenant (in questo lab)", "Un team con il suo resource group, state, identità di apply ed environment. Non un tenant Entra ID."),
+    ("Canary / ring", "Rilascio a ondate: prima un tenant (ring 0), poi gli altri solo se il primo è sano."),
+    ("Drift", "Differenza tra ciò che dice il codice e ciò che esiste in Azure, per esempio dopo una modifica dal portale."),
+    ("Blast radius", "Il raggio d'azione: quanto danno può fare un errore o una credenziale compromessa."),
+    ("Control plane / data plane", "Gestire le risorse (creare o cancellare uno Storage) contro i dati al loro interno (i blob)."),
+    ("Roll-forward", "Tornare a uno stato buono con un nuovo deploy della configurazione nota, invece di \"annullare\"."),
+    ("Break-glass", "Procedura d'emergenza deliberata e tracciata per superare una protezione, per esempio il teardown del lab."),
+    ("Agent mode / cloud agent", "Copilot in VS Code esegue passi e comandi con conferma; il cloud agent lavora su GitHub e apre PR."),
+    ("MCP (Model Context Protocol)", "Protocollo con cui un agente usa strumenti esterni. Azure MCP Server espone strumenti per Azure."),
+], key=lambda g: g[0].lower())
+PER_PAGE = 7
+pages = [GLOSSARY[i:i + PER_PAGE] for i in range(0, len(GLOSSARY), PER_PAGE)]
+for n, page in enumerate(pages, 1):
+    s = new("Solo titolo", f"Glossario ({n}/{len(pages)})", """
+APPENDICE, non si presenta: è per chi scarica il deck.
+""")
+    table(s, [("Termine", "Significato")] + page, (3.3, 9.1), y=1.55, row_h=0.55, size=14, head_size=15)
+
+TALK_END = CLOCK[0]
 
 # ---------------------------------------------------------------- Hidden backups
 s = new("Solo titolo", "Backup: approvazione dell'environment", """
@@ -600,3 +827,6 @@ for i, (t, n) in enumerate(NOTES, 1):
     md += [f"## {i}. {t}", "", n or "_(nessuna nota)_", ""]
 (HERE / "speaker-notes.md").write_text("\n".join(md), encoding="utf-8")
 print(f"OK: {len(prs.slides)} slides -> {OUT}")
+delta = TALK_END - TALK_SECONDS
+print(f"TIME: {mmss(TALK_END)} di {mmss(TALK_SECONDS)}"
+      + (f" -> oltre di {mmss(delta)}: tagliare prima di salire sul palco" if delta > 0 else " -> ok"))

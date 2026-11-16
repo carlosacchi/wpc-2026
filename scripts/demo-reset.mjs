@@ -34,7 +34,7 @@ export function diffTeams(read = path => readFileSync(path, "utf8"), list = dir 
 }
 
 const run = (cmd, args, options = {}) =>
-  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], ...options }).trim();
+  (execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], ...options }) ?? "").trim();
 
 function openDemoPrs() {
   const prs = JSON.parse(run("gh", ["pr", "list", "--state", "open", "--json", "number,headRefName,title,files"]));

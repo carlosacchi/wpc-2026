@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0
+
+### Aggiunto
+- Deck: slide "Chi sono" con ruolo, Microsoft MVP e Azure Italia Podcast (foto da `docs/CarloSacchiBio.png`, loghi MVP e Azure Italia Podcast da `docs/`, stemma `assets/pizza-it-nl.png`; se un file manca usa iniziali o numeri), due slide "Le parole di questa sessione" con 12 termini in ordine alfabetico (definizione generale e significato nella sessione) e glossario completo in appendice (28 termini in ordine alfabetico, non presentato).
+- Deck: slide "Azure MCP Server: contesto, non giudizio", basata sulla documentazione Microsoft Learn e sulla release 3.0 (ottobre 2026).
+- `build_deck.py`: i tempi delle note sono calcolati dalla durata di ogni slide e la build stampa la durata totale rispetto ai 45 minuti.
+
+### Modificato
+- `.github/CODEOWNERS`: i file della piattaforma (gate e script, test, `package.json`, workflow, bootstrap, moduli, workload root, confronto Bicep, baseline della demo) sono di `@azureitaliadevops`; i file dei team non hanno proprietario. Rimosso il proprietario generico `* @carlosacchi`, che con la review dei code owner attiva avrebbe bloccato le PR del relatore. Ha effetto solo dopo aver attivato *Require review from Code Owners* nella branch protection di `main`.
+- Deck: "Copilot: cosa copre e cosa no" diventa "Copilot: cosa sa e cosa non decide". Con la documentazione del provider e Azure MCP Server Copilot può sapere se un cambio è un replace: il punto non è cosa sa, ma cosa decide.
+- `.gitignore`: esclusi gli ambienti Python locali (`.venv*/`, `venv/`) e `.DS_Store`.
+- Note dello speaker riscritte in forma discorsiva: dettagli dei post-mortem, osservazioni sul lab, cosa dire durante la demo, domande probabili nel Q&A. Non ripetono più il testo delle slide.
+
+### Corretto
+- Amazon Q (deck e `docs/case-study.md`): la causa è un token GitHub con permessi eccessivi nella configurazione di build, e il codice non è stato eseguito per un errore di sintassi (AWS-2025-015). Non un contributo esterno.
+- Deck, README e `docs/case-study.md`: la MI di plan non è solo Reader (scrive anche lo state); `prevent_destroy` protegge solo lo state e i RG dei tenant, non lo Storage dei workload, quindi il quinto livello del deck è il resource lock; i ruoli ereditati attraversano i tenant ma non annullano policy e lock.
+- Deck: i gate rispondono `PASS` o `DENY` (non "ALLOW"); la mappa tenant → RG è nel gate, "non nei file dei team" (il nome del RG è anche nel file del team).
+- Note dello speaker allineate tra loro e con slide, runbook e codice: il passo 5 può rispondere la policy o il lock; in sala si lancia solo il canary; la risposta su "e se l'agente modifica il gate?" dichiara che oggi la branch protection non richiede una review separata sui file della piattaforma.
+
+## 0.4.1
+
+Correzioni emerse dalla prova generale.
+
+### Corretto
+- `scripts/demo-reset.mjs`: il reset si interrompeva dopo l'apertura della PR (`Cannot read properties of null`) perché l'attesa dei check ignorava lo stdout. Emerso nella prima prova generale con drift reale.
+- `docs/session/build_deck.py`: nella slide "Tenant simulati, confini reali" la didascalia della subscription non si sovrappone più al bordo del riquadro.
+
+### Verificato
+- Prova generale completa in Azure: rinomina → PR verde → doppio DENY (run 42919010193); correzione → approvazione del revisore → `0 added, 1 changed` → HEALTHY (run 42919302894); `demo:reset` → PR #9 unita; il rollout di riallineamento (run 42920906060) attende l'approvazione del revisore.
+
 ## 0.4.0
 
 Materiali della sessione WPC 2026: deck, note dello speaker, demo e immagini.
