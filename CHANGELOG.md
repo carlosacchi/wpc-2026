@@ -1,5 +1,15 @@
 # Changelog
 
+## Non rilasciato
+
+### Aggiunto
+- `docs/session/demo-guida-a-z.md`: guida completa alla demo per chi non conosce il progetto: ruoli, installazione, preparazione, controlli, passi con risultati attesi, piano B e ripristino; controlli prima di una nuova presentazione (rollout `rings=all` come verifica senza modifiche); smantellamento finale manuale (break-glass) con i nomi reali di lock, policy e identità, e perché non è una pipeline.
+- `docs/session/da-portare-a-casa.md`: materiale per il pubblico: messaggi della sessione, dieci controlli sul proprio ambiente, easy win, passi successivi e dodici snippet da adattare (gate su plan e What-If, workflow OIDC con approvazione, CODEOWNERS, lock, DenyAction, prevent_destroy, terminale dell'agente, istruzioni Copilot, Azure MCP in sola lettura, soft delete).
+- Deck: l'ultima slide indica `da-portare-a-casa.md` e la guida alla demo.
+
+### Corretto
+- Runbook: si committa solo il file del team. `git commit -am` poteva includere `.terraform.lock.hcl` aggiornato da `terraform init`, e con `CODEOWNERS` la PR della demo sarebbe rimasta bloccata.
+
 ## 0.5.0
 
 ### Aggiunto

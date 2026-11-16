@@ -1,5 +1,7 @@
 # Runbook della demo (circa 15 minuti)
 
+Versione breve per chi presenta. Per eseguire la demo da zero, anche senza conoscere il progetto, usa la [guida dalla A alla Z](demo-guida-a-z.md).
+
 Demo live con Copilot Chat in agent mode in VS Code, con fallback registrati. Regola: se un passo non risponde entro 60 secondi, si passa al backup (link qui sotto o slide nascoste del deck) e si prosegue.
 
 ## Ruoli
@@ -44,7 +46,9 @@ git switch -c demo/rename-sales
 In Copilot Chat (agent mode) il prompt del passo 1 di [prompts.md](prompts.md). Poi:
 
 ```sh
-git commit -am "Rename Sales storage account (requested by Sales)"
+git status --short                                   # se compare infra/workload/.terraform.lock.hcl: git restore <file>
+git add infra/workload/teams/sales.tfvars.json       # solo il file del team: gli altri hanno un code owner e bloccherebbero la PR
+git commit -m "Rename Sales storage account (requested by Sales)"
 git push -u origin demo/rename-sales
 gh pr create --fill --base main
 gh pr checks --watch                 # validate verde: è il punto
@@ -70,7 +74,7 @@ Fallback: `gh workflow run rollout.yml -f scenario=rename-demo -f rings=canary-o
 git switch main && git pull --ff-only && git switch -c demo/fix-sales
 ```
 
-Prompt del passo 3 di [prompts.md](prompts.md), incollando le righe DENY. Poi commit, PR, `gh pr checks --watch`, merge come al passo 1.
+Prompt del passo 3 di [prompts.md](prompts.md), incollando le righe DENY. Poi commit del solo file del team, PR, `gh pr checks --watch`, merge come al passo 1.
 
 ### 4. Approvazione e canary (~4 min)
 

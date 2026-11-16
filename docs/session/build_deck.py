@@ -734,7 +734,7 @@ for i, (h, b) in enumerate(take):
 box(s, 0.6, 5.2, 12.1, 0.9, "Copilot accelera. La piattaforma decide.", fill=RED, size=26, bold=True)
 
 s = new("Titolo e contenuto", "Grazie! Codice, demo e fonti", """
-[43:00–45:00] Lascio il QR sullo schermo per tutto il Q&A: è il modo più semplice per chi vuole rifare la demo.
+[43:00–45:00] Lascio il QR sullo schermo per tutto il Q&A. Indico un file solo: docs/session/da-portare-a-casa.md. Dentro ci sono dieci controlli da fare sul proprio ambiente, cosa attivare lunedì mattina e gli snippet da copiare.
 Domande probabili, con una risposta breve:
 - «E se l'agente modifica il gate?» Il gate sta nello stesso repository, ma i file della piattaforma (gate, workflow, test, bootstrap, moduli) hanno in CODEOWNERS un proprietario diverso da me: una PR che li tocca resta ferma finché non approva lui, chiunque l'abbia scritta, io o Copilot. I file dei team invece non hanno proprietario, ed è lì che lavora l'agente. E se qualcuno riconfigura GitHub, identità, policy e lock non dipendono dal repository.
 - «Perché non basta Azure Policy?» Perché la policy valuta la singola richiesta, non il piano: non sa che quel delete fa parte di un replace.
@@ -745,12 +745,15 @@ fill_text(ph(s, 1).text_frame, [
     "Repository del lab: **github.com/carlosacchi/wpc-2026**",
     ("Workflow, gate, bootstrap Terraform, test", 1),
     ("docs/case-study.md: post-mortem e mappatura sui controlli", 1),
-    ("docs/session/demo-runbook.md: come rifare la demo", 1),
+    ("docs/session/da-portare-a-casa.md: controlli, easy win e snippet", 1),
+    ("docs/session/demo-guida-a-z.md: come rifare la demo", 1),
     "Atlassian PIR, aprile 2022",
     "Azure DevOps post-mortem, maggio 2023",
     "GitHub Docs: rischi e mitigazioni del coding agent Copilot",
 ], size=20)
-ph(s, 1).width = Inches(8.6)
+body = ph(s, 1)
+lay = next(l for l in s.slide_layout.placeholders if l.placeholder_format.idx == 1)
+body.left, body.top, body.width, body.height = lay.left, lay.top, Inches(8.6), lay.height  # full geometry, not width only
 qr_path = HERE / "out/qr-repo.png"
 qr_path.parent.mkdir(parents=True, exist_ok=True)
 qrcode.make(REPO, border=1).save(qr_path)
