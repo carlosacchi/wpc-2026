@@ -238,13 +238,12 @@ git commit -m "Rename Sales storage account (requested by Sales)"
 ```sh
 git push -u origin demo/rename-sales
 gh pr create --fill --base main
-gh pr checks --watch --required
-gh pr merge --squash --delete-branch --auto
+gh pr checks --watch --required && gh pr merge --squash --delete-branch
 ```
 
-Atteso: `validate` verde in circa un minuto. `--auto` rispetta la protezione di `main`: se qualche requisito è ancora in sospeso, GitHub esegue il merge appena tutti sono soddisfatti. Non usare `--admin` per aggirare i controlli.
+Atteso: `validate` verde in circa un minuto, poi lo squash merge. Il merge parte solo se il comando dei check riesce. Il repository ha l'auto-merge disabilitato: non aggiungere `--auto`. Non usare `--admin` per aggirare i controlli.
 
-Se `gh pr checks` non mostra nulla, verifica il check nella pagina della PR. Prima di avviare il canary, verifica che la PR risulti **Merged** (se il merge è in attesa, non basta che sia stato abilitato `--auto`).
+Se il merge è bloccato, controlla nella pagina della PR che in **Files changed** ci sia solo il file Sales e verifica quale requisito manca. Se il branch è indietro rispetto a `main`, usa **Update branch** (oppure `gh pr update-branch`), poi ripeti l'attesa dei check e il merge. Se `gh pr checks` non mostra nulla, verifica il check nella pagina della PR. Avvia il canary solo dopo che la PR risulta **Merged**.
 
 Da dire: "La CI è verde e nel diff c'è solo una lettera in più. Ma `validate` non ci dice se Terraform dovrà sostituire lo Storage account: per scoprirlo serve il piano."
 
@@ -314,11 +313,10 @@ git add infra/workload/teams/sales.tfvars.json
 git commit -m "Keep Sales storage account, express new classification as service_label"
 git push -u origin demo/fix-sales
 gh pr create --fill --base main
-gh pr checks --watch --required
-gh pr merge --squash --delete-branch --auto
+gh pr checks --watch --required && gh pr merge --squash --delete-branch
 ```
 
-Come al passo 1d, verifica che la PR risulti **Merged** prima di avviare il rollout.
+Come al passo 1d, se il merge è bloccato controlla i file della PR e il requisito mancante. Verifica che la PR risulti **Merged** prima di avviare il rollout.
 
 ### Passo 4: approvazione e canary (~4 min)
 

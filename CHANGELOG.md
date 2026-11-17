@@ -10,6 +10,11 @@
 ### Corretto
 - Runbook: si committa solo il file del team. `git commit -am` poteva includere `.terraform.lock.hcl` aggiornato da `terraform init`, e con `CODEOWNERS` la PR della demo sarebbe rimasta bloccata.
 
+## 0.5.2
+
+### Corretto
+- Guida alla demo: usa lo squash merge manuale dopo i check richiesti, senza dipendere dall'auto-merge del repository. Documentato come aggiornare il branch della PR rispetto a `main`.
+
 ## 0.5.1
 
 ### Corretto
