@@ -10,6 +10,12 @@
 ### Corretto
 - Runbook: si committa solo il file del team. `git commit -am` poteva includere `.terraform.lock.hcl` aggiornato da `terraform init`, e con `CODEOWNERS` la PR della demo sarebbe rimasta bloccata.
 
+## 0.5.1
+
+### Corretto
+- Guida alla demo: attesa dei check obbligatori e squash merge con `--auto` nel rispetto della protezione di `main`; conferma del merge prima del canary. Chiarito che `terraform validate` non rileva la sostituzione dello Storage account prevista dal piano.
+- Guida alla demo: il comando del passo 2b rimuove i codici colore ANSI dai log del canary senza alterare le righe selezionate.
+
 ## 0.5.0
 
 ### Aggiunto

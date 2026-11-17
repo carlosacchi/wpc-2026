@@ -238,13 +238,15 @@ git commit -m "Rename Sales storage account (requested by Sales)"
 ```sh
 git push -u origin demo/rename-sales
 gh pr create --fill --base main
-gh pr checks --watch
-gh pr merge --squash --delete-branch
+gh pr checks --watch --required
+gh pr merge --squash --delete-branch --auto
 ```
 
-Atteso: `validate` verde in circa un minuto, poi il merge riesce.
+Atteso: `validate` verde in circa un minuto. `--auto` rispetta la protezione di `main`: se qualche requisito è ancora in sospeso, GitHub esegue il merge appena tutti sono soddisfatti. Non usare `--admin` per aggirare i controlli.
 
-Da dire: "La CI è verde: la sintassi è perfetta. Chi rivede il diff vede una lettera in più."
+Se `gh pr checks` non mostra nulla, verifica il check nella pagina della PR. Prima di avviare il canary, verifica che la PR risulti **Merged** (se il merge è in attesa, non basta che sia stato abilitato `--auto`).
+
+Da dire: "La CI è verde e nel diff c'è solo una lettera in più. Ma `validate` non ci dice se Terraform dovrà sostituire lo Storage account: per scoprirlo serve il piano."
 
 ### Passo 2: il rollout viene bloccato, due DENY (~3 min)
 
@@ -264,12 +266,16 @@ Atteso: dopo qualche minuto il job **Plan + gates (sales)** fallisce. Il rollout
 **2b. Mostra il motivo**
 
 ```sh
-gh run view "$RUN" --log | grep -E "forces replacement|DENY:"
+gh run view "$RUN" --log \
+  | grep -E 'forces replacement|DENY:' \
+  | awk '{ gsub(/(\033|\^\[)\[[0-9;]*m/, ""); print }'
 ```
 
+`awk` rimuove solo i codici colore ANSI: `^[[33m->^[[0m^[[0m` diventa `->`.
+
 Atteso:
-- una riga con `# forces replacement`: Terraform cancellerebbe lo Storage e ne creerebbe uno nuovo;
-- due righe `DENY:`, una dal gate Terraform e una dal gate Bicep What-If.
+- il cambio di nome con `# forces replacement`, che può comparire due volte: Terraform cancellerebbe lo Storage e ne creerebbe uno nuovo;
+- due messaggi `DENY:` dei gate, uno da Terraform e uno da Bicep What-If; il filtro può mostrare anche l'annotazione finale del workflow.
 
 In alternativa, apri la run nel browser (`gh run view "$RUN" --web`) e mostra il job **Plan + gates (sales)**.
 
@@ -308,9 +314,11 @@ git add infra/workload/teams/sales.tfvars.json
 git commit -m "Keep Sales storage account, express new classification as service_label"
 git push -u origin demo/fix-sales
 gh pr create --fill --base main
-gh pr checks --watch
-gh pr merge --squash --delete-branch
+gh pr checks --watch --required
+gh pr merge --squash --delete-branch --auto
 ```
+
+Come al passo 1d, verifica che la PR risulti **Merged** prima di avviare il rollout.
 
 ### Passo 4: approvazione e canary (~4 min)
 
