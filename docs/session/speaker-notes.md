@@ -189,7 +189,7 @@ Runbook: docs/session/demo-runbook.md.
 
 ## 26. Grazie! Codice, demo e fonti
 
-[46:45–48:45] Lascio il QR sullo schermo per tutto il Q&A: è il modo più semplice per chi vuole rifare la demo.
+[46:45–48:45] Lascio il QR sullo schermo per tutto il Q&A. Indico un file solo: docs/session/da-portare-a-casa.md. Dentro ci sono dieci controlli da fare sul proprio ambiente, cosa attivare lunedì mattina e gli snippet da copiare.
 Domande probabili, con una risposta breve:
 - «E se l'agente modifica il gate?» Il gate sta nello stesso repository, ma i file della piattaforma (gate, workflow, test, bootstrap, moduli) hanno in CODEOWNERS un proprietario diverso da me: una PR che li tocca resta ferma finché non approva lui, chiunque l'abbia scritta, io o Copilot. I file dei team invece non hanno proprietario, ed è lì che lavora l'agente. E se qualcuno riconfigura GitHub, identità, policy e lock non dipendono dal repository.
 - «Perché non basta Azure Policy?» Perché la policy valuta la singola richiesta, non il piano: non sa che quel delete fa parte di un replace.

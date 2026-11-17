@@ -85,7 +85,9 @@ Sul palco questo è anche il messaggio sul rollback: **non si "torna indietro" c
 In [docs/session/](docs/session/):
 
 - [build_deck.py](docs/session/build_deck.py): unica fonte di slide, diagrammi (forme native, modificabili in PowerPoint) e note dello speaker. Genera il deck sul template ufficiale WPC 2026 e [speaker-notes.md](docs/session/speaker-notes.md).
-- [demo-runbook.md](docs/session/demo-runbook.md): preflight, ruoli, comandi, fallback e reset della demo live.
+- [da-portare-a-casa.md](docs/session/da-portare-a-casa.md): per chi ha seguito la sessione: messaggi chiave, dieci controlli sul proprio ambiente, easy win da attivare subito, passi successivi e snippet da adattare.
+- [demo-guida-a-z.md](docs/session/demo-guida-a-z.md): la demo dalla A alla Z, per chi la esegue senza conoscere il progetto: installazione, account, preparazione, comandi, piano B e ripristino.
+- [demo-runbook.md](docs/session/demo-runbook.md): preflight, ruoli, comandi, fallback e reset della demo live, in versione breve.
 - [prompts.md](docs/session/prompts.md): i prompt per Copilot Chat in agent mode.
 - [.github/copilot-instructions.md](.github/copilot-instructions.md): istruzioni di repository per Copilot. Sono una guida, non un controllo: in sessione si mostra che i gate decidono comunque.
 
