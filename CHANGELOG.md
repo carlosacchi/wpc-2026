@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+### Aggiunto
+- `docs/session/demo-guida-a-z.md`: guida completa alla demo, con squash merge dopo i check obbligatori e output del canary senza codici colore ANSI.
+
 ## 0.5.0
 
 ### Aggiunto
