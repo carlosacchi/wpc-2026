@@ -10,12 +10,6 @@ whatif.json
 terraform-test-events.jsonl
 infra/bootstrap/imports.generated.tf
 node_modules/
-docs/Template_WPC2026.pptx
-docs/session/out/
-# speaker photo and third-party logos used by the deck: kept local, like the template
-docs/CarloSacchiBio.png
-docs/mvp2627.webp
-docs/2024 AZURE ITALIA SQUARE NUOVO WHITE 1200.png
 __pycache__/
 # local Python environments and OS noise
 .venv*/

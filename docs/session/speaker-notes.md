@@ -327,7 +327,7 @@ Ultima parte, la più onesta: come si rifà tutto domani mattina, e cosa questo 
 
 ## 23. Rollback = roll-forward
 
-[39:15–41:00] DA RECITARE
+[39:15–40:30] DA RECITARE
 Dopo una demo, la tentazione può essere cancellare tutto e ripartire. Qui il reset è un roll-forward: confronta i file dei team con una baseline versionata, apre una pull request di ripristino, passa dalla CI e dallo stesso rollout approvato.
 
 Il reset è idempotente: se i file sono già allineati non serve una pull request e l'apply viene saltato. Ma ripristina la configurazione, non i dati. Se un replace avesse cancellato i blob, il roll-forward non li riporterebbe indietro: servono backup e procedure di ripristino provate.
@@ -343,7 +343,7 @@ Il rollback. Dopo una demo andata male la tentazione è «cancello e ricreo». Q
 
 ## 24. Limiti dichiarati
 
-[41:00–42:15] DA RECITARE
+[40:30–41:30] DA RECITARE
 Prima che me lo chiediate, ecco i limiti principali. Il più importante riguarda i ruoli ereditati: un Contributor a livello di subscription può agire anche nei resource group dei team. La policy e il lock restano, ma la separazione tra i team non è più garantita. Per questo bisogna controllare i ruoli assegnati agli scope superiori.
 
 Il canary qui è un team, non una percentuale di traffico. La policy protegge l'azione di delete sugli Storage con il tag previsto, non i blob al loro interno; il laboratorio protegge il control plane, non i dati.
@@ -358,9 +358,32 @@ Questi limiti li dico io, prima che li trovi qualcuno in sala.
 - Il lab protegge il control plane, non i dati: bloccare la cancellazione dello Storage non impedisce di cancellare i blob dentro.
 - Chi amministra il repository può cambiare branch protection ed environment. Per questo policy e lock stanno in Azure: chi controlla GitHub non li controlla automaticamente.
 
-## 25. Da portare a casa
+## 25. Protezioni spesso spente
 
-[42:15–43:30] DA RECITARE
+[41:30–42:30] DA RECITARE
+Il laboratorio protegge il control plane, non i dati. Quindi, prima di tornare in ufficio, ecco cosa controllare. Non c'è niente di esotico: sono impostazioni che esistono già, ma spesso sono spente di default, oppure qualcuno può spegnerle.
+
+In Terraform, prevent_destroy sulle risorse che custodiscono dati e sullo state, e un gate che legga il piano. E attenzione al provider azurerm: di default, un destroy purga il Key Vault anche dal soft delete.
+
+In Azure, soft delete e versioning sui blob, purge protection sul Key Vault, soft delete del server SQL, backup immutabili. E poi lock e policy, che valgono anche fuori dalla pipeline.
+
+Non dovete ricordarla adesso: la trovate nel deck, sul repository.
+
+SPUNTI FACOLTATIVI
+La slide da fotografare. Non la leggo riga per riga: scelgo due o tre righe in base alla sala.
+- prevent_destroy accetta solo valori letterali: non si può accendere con una variabile solo in prod. Se il modulo è condiviso tra gli ambienti, di fatto è acceso ovunque.
+- prevent_destroy non è un controllo di sicurezza: se qualcuno, persona o agente, cancella il blocco resource o il lifecycle, Terraform distrugge senza avvisare. Per questo serve anche la review dei moduli (qui: CODEOWNERS) e, fuori da Terraform, lock e policy. Per togliere una risorsa dal codice senza distruggerla c'è il blocco removed con lifecycle { destroy = false }.
+- Nel lab prevent_destroy è sullo state e sui RG dei tenant, non sullo Storage: lì Terraform fermerebbe il piano prima del gate e nella demo non vedreste il gate.
+- Provider azurerm: purge_soft_delete_on_destroy è true di default per Key Vault, App Configuration, API Management e Cognitive Services. Un terraform destroy li cancella anche dal soft delete. prevent_deletion_if_contains_resources sui resource group è true di default: non spegnetelo per comodità.
+- Storage: se cancellate un account, il recupero dal portale è possibile entro 14 giorni, se nessuno ha ricreato lo stesso nome, ed è best effort. Microsoft stessa raccomanda il lock. Il soft delete dei blob non aiuta se sparisce l'account intero.
+- Azure SQL: il soft delete del server logico è in preview, da 1 a 7 giorni; per i server con meno di due anni è spento di default. È esattamente lo scenario di Azure DevOps.
+- Azure Backup: con MUA le operazioni critiche, come spegnere il soft delete o ridurre la retention, richiedono l'autorizzazione di un'altra persona tramite Resource Guard.
+- Bicep: con un deployment stack in denyDelete e detachAll, togliere una risorsa dal template non la cancella e nessuno la cancella a mano.
+- Domanda probabile: «prevent_destroy su tutti gli ambienti o solo in prod?» Su tutti gli ambienti stabili, sulle risorse che custodiscono dati, chiavi o state: stesso comportamento ovunque, e la procedura per superarlo si impara in dev, non in prod durante un incidente. Non su tutto: su risorse senza dati blocca replace legittimi e insegna a toglierlo per riflesso. Negli ambienti effimeri, per esempio uno per PR, il teardown passa da una procedura esplicita.
+
+## 26. Da portare a casa
+
+[42:30–43:45] DA RECITARE
 Tre idee da portare a casa. La prima: si decide sul piano, non sulla sintassi. Una validazione verde non ci dice quale sarà l'effetto.
 
 La seconda: il raggio d'azione di un agente, come quello di una persona, dipende dall'architettura delle identità, non da una frase nel prompt.
@@ -374,9 +397,9 @@ Tre frasi, lente. Se il pubblico se ne ricorda una sola, va bene lo stesso.
 - La terza è per chi la notte vuole dormire: una rete di sicurezza dentro Azure, fuori dalla pipeline, perché prima o poi qualcuno la pipeline la aggira.
 - Pausa, poi la chiusura: «Copilot accelera. La piattaforma decide.»
 
-## 26. Grazie! Codice, demo e fonti
+## 27. Grazie! Codice, demo e fonti
 
-[43:30–45:00] DA RECITARE
+[43:45–45:00] DA RECITARE
 Grazie. Lascio il QR sullo schermo per le domande e per chi vuole esplorare o ripetere la demo: nel repository trovate il codice, le fonti e il runbook.
 
 Una domanda che spesso arriva è se il gate possa essere modificato dall'agente. I file della piattaforma richiedono la review di un code owner; i file dei team sono invece quelli su cui l'agente può lavorare. E anche se qualcuno cambiasse le regole di GitHub, le identità, le policy e i lock in Azure resterebbero controlli separati.
@@ -391,26 +414,26 @@ Domande probabili, con una risposta breve:
 - «Funziona con Azure DevOps?» Il principio sì: environment con approvazioni e controlli, service connection con workload identity federation, lo stesso gate in uno step.
 - «Quanto costa il lab?» Quasi niente: due Storage praticamente vuoti più lo state. Identità e policy non costano.
 
-## 27. Glossario (1/4)
+## 28. Glossario (1/4)
 
 APPENDICE, non si presenta: è per chi scarica il deck.
 
-## 28. Glossario (2/4)
+## 29. Glossario (2/4)
 
 APPENDICE, non si presenta: è per chi scarica il deck.
 
-## 29. Glossario (3/4)
+## 30. Glossario (3/4)
 
 APPENDICE, non si presenta: è per chi scarica il deck.
 
-## 30. Glossario (4/4)
+## 31. Glossario (4/4)
 
 APPENDICE, non si presenta: è per chi scarica il deck.
 
-## 31. Backup: approvazione dell'environment
+## 32. Backup: approvazione dell'environment
 
 BACKUP (nascosta). Run reale 42823102175: il revisore azureitaliadevops approva il deployment sales. Chi ha lanciato la run (carlosacchi) non può approvare: current_user_can_approve = false.
 
-## 32. Backup: canary Sales, output reali
+## 33. Backup: canary Sales, output reali
 
 BACKUP (nascosta). Run 42823102175 (canary) e 42917201757 (rings=all: Sales senza modifiche, apply saltato).

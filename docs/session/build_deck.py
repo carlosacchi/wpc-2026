@@ -164,6 +164,13 @@ Il teardown finale è una procedura break-glass deliberata, con passaggi approva
 Il canary qui è un team, non una percentuale di traffico. La policy protegge l'azione di delete sugli Storage con il tag previsto, non i blob al loro interno; il laboratorio protegge il control plane, non i dati.
 
 Infine, chi amministra il repository può cambiare le protezioni di GitHub. Policy e lock sono in Azure proprio per aggiungere controlli che non dipendono solo dalla configurazione del repository.""",
+    "Protezioni spesso spente": """Il laboratorio protegge il control plane, non i dati. Quindi, prima di tornare in ufficio, ecco cosa controllare. Non c'è niente di esotico: sono impostazioni che esistono già, ma spesso sono spente di default, oppure qualcuno può spegnerle.
+
+In Terraform, prevent_destroy sulle risorse che custodiscono dati e sullo state, e un gate che legga il piano. E attenzione al provider azurerm: di default, un destroy purga il Key Vault anche dal soft delete.
+
+In Azure, soft delete e versioning sui blob, purge protection sul Key Vault, soft delete del server SQL, backup immutabili. E poi lock e policy, che valgono anche fuori dalla pipeline.
+
+Non dovete ricordarla adesso: la trovate nel deck, sul repository.""",
     "Da portare a casa": """Tre idee da portare a casa. La prima: si decide sul piano, non sulla sintassi. Una validazione verde non ci dice quale sarà l'effetto.
 
 La seconda: il raggio d'azione di un agente, come quello di una persona, dipende dall'architettura delle identità, non da una frase nel prompt.
@@ -526,7 +533,7 @@ picture(s, "wrong-scope.jpg", 6.75, 1.63, w=6.08)
 source(s, "atlassian.com/engineering/post-incident-review-april-2022-outage")
 
 s = new("Solo titolo", "Azure DevOps, maggio 2023", """
-[4:45–7:00] Questo caso riguarda Microsoft: Azure DevOps è il servizio, non il nome dell'azienda.
+[4:45–7:00] Azure DevOps è il servizio Microsoft. Il rollout graduale c'era già, ma il ring interno non conteneva il caso critico.
 - Una PR molto grande: migrazione dei pacchetti da Microsoft.Azure.Management a Azure.ResourceManager. Il tipo di PR che si approva con fiducia, perché «è solo una migrazione di SDK».
 - Dentro c'è un refuso: il job che doveva cancellare un database snapshot adesso cancella l'Azure SQL Server che lo ospita.
 - Ring 0, interno: non c'erano snapshot abbastanza vecchi da far scattare il job. Il canary è passato verde senza mai incontrare la condizione pericolosa.
@@ -591,10 +598,9 @@ table(s, rows, (2.2, 6.0, 4.1), row_h=1.1)
 source(s, "The Register, 27/04/2026 · AWS Security Bulletin AWS-2025-015 · dettagli in docs/case-study.md")
 
 s = new("Solo titolo", "Copilot: cosa sa e cosa non decide", """
-[10:45–13:15] La slide in cui devo essere più onesto su Copilot.
-- Non confondere i due controlli: revisione della PR per cambiare la piattaforma; approvazione dell'Environment per applicare le modifiche di un team.
-- Se il repository non richiede una review, non c'è un'approvazione della PR da aspettare.
-- Il terminale dell'agente usa le credenziali dell'utente che lo esegue.
+[10:45–13:15] - La review del Code Owner serve per modificare gate e workflow; l'approvazione dell'Environment serve per applicare il workload.
+- Senza una review richiesta nelle regole del repository, una PR può essere unita senza approvazione.
+- L'agent mode usa il terminale dell'utente e quindi può ereditare le sue credenziali Azure.
 """)
 columns(s, [
     ("Protezioni già presenti", NAVY, [
@@ -800,7 +806,7 @@ section(5, "Rollback, limiti, takeaway", "Tornare indietro senza cancellare", ""
 """)
 
 s = new("Solo titolo", "Rollback = roll-forward", """
-[38:00–39:45] Il rollback. Dopo una demo andata male la tentazione è «cancello e ricreo». Qui il rollback non cancella niente.
+[38:00–39:15] Il rollback. Dopo una demo andata male la tentazione è «cancello e ricreo». Qui il rollback non cancella niente.
 - La baseline è versionata in demo/baseline. npm run demo:reset confronta i file dei team con la baseline, apre una PR di ripristino, aspetta la CI, la unisce e lancia il rollout su tutti i ring, con gli stessi gate e la stessa approvazione. Anche tornare indietro è un cambiamento, e passa dallo stesso cancello.
 - È idempotente: se tutto è già allineato non apre nemmeno la PR e l'apply viene saltato. È così che preparo il lab prima di ogni sessione.
 - Precisazione importante: il reset riporta configurazione e tag, non dati. Se il replace fosse passato, nessun roll-forward riporterebbe indietro i blob. Per i dati servono soft delete, backup e ripristini provati, e il lab non li dimostra.
@@ -829,7 +835,7 @@ box(s, 7.35, 3.6, 5.5, 2.5, [("Teardown = break-glass", {"bold": True, "size": 2
     fill=LIGHT, fg=INK, align=PP_ALIGN.LEFT)
 
 s = new("Titolo e contenuto", "Limiti dichiarati", """
-[39:45–41:00] Questi limiti li dico io, prima che li trovi qualcuno in sala.
+[39:15–40:15] Questi limiti li dico io, prima che li trovi qualcuno in sala.
 - Il più importante sono i ruoli ereditati. Chi è Contributor sulla subscription attraversa tutti i tenant, perché RBAC eredita verso il basso. Policy e lock restano, ma la separazione tra team no. Mi è successo: nel mio lab il revisore era Contributor sulla subscription, e l'ho tolto preparando questa sessione. Controllate i vostri.
 - Il canary qui è per team: non c'è traffico da spostare, quindi niente split al 5%.
 - La DenyAction protegge gli Storage che hanno il tag del progetto: chi può cambiare quel tag li fa uscire dalla policy. Il lock resta.
@@ -844,6 +850,43 @@ fill_text(ph(s, 1).text_frame, [
     "**I gate sono regole didattiche esplicite**, non uno scanner di sicurezza completo",
     "**Chi amministra il repo** può riconfigurare branch protection ed environment",
 ], size=20)
+
+s = new("Solo titolo", "Protezioni spesso spente", """
+[40:15–41:15] La slide da fotografare. Non la leggo riga per riga: scelgo due o tre righe in base alla sala.
+- prevent_destroy accetta solo valori letterali: non si può accendere con una variabile solo in prod. Se il modulo è condiviso tra gli ambienti, di fatto è acceso ovunque.
+- prevent_destroy non è un controllo di sicurezza: se qualcuno, persona o agente, cancella il blocco resource o il lifecycle, Terraform distrugge senza avvisare. Per questo serve anche la review dei moduli (qui: CODEOWNERS) e, fuori da Terraform, lock e policy. Per togliere una risorsa dal codice senza distruggerla c'è il blocco removed con lifecycle { destroy = false }.
+- Nel lab prevent_destroy è sullo state e sui RG dei tenant, non sullo Storage: lì Terraform fermerebbe il piano prima del gate e nella demo non vedreste il gate.
+- Provider azurerm: purge_soft_delete_on_destroy è true di default per Key Vault, App Configuration, API Management e Cognitive Services. Un terraform destroy li cancella anche dal soft delete. prevent_deletion_if_contains_resources sui resource group è true di default: non spegnetelo per comodità.
+- Storage: se cancellate un account, il recupero dal portale è possibile entro 14 giorni, se nessuno ha ricreato lo stesso nome, ed è best effort. Microsoft stessa raccomanda il lock. Il soft delete dei blob non aiuta se sparisce l'account intero.
+- Azure SQL: il soft delete del server logico è in preview, da 1 a 7 giorni; per i server con meno di due anni è spento di default. È esattamente lo scenario di Azure DevOps.
+- Azure Backup: con MUA le operazioni critiche, come spegnere il soft delete o ridurre la retention, richiedono l'autorizzazione di un'altra persona tramite Resource Guard.
+- Bicep: con un deployment stack in denyDelete e detachAll, togliere una risorsa dal template non la cancella e nessuno la cancella a mano.
+- Domanda probabile: «prevent_destroy su tutti gli ambienti o solo in prod?» Su tutti gli ambienti stabili, sulle risorse che custodiscono dati, chiavi o state: stesso comportamento ovunque, e la procedura per superarlo si impara in dev, non in prod durante un incidente. Non su tutto: su risorse senza dati blocca replace legittimi e insegna a toglierlo per riflesso. Negli ambienti effimeri, per esempio uno per PR, il teardown passa da una procedura esplicita.
+""")
+table(s, [("Dove", "Attivare o verificare", "Perché: default e trappole"),
+          ("Terraform", "prevent_destroy su state, dati, chiavi, database",
+           "Se il blocco sparisce dal codice, sparisce la protezione"),
+          ("Terraform", "Gate sul plan (niente -/+ o delete); apply del plan salvato",
+           "validate verde = sintassi giusta, non effetto giusto"),
+          ("azurerm", "key_vault { purge_soft_delete_on_destroy = false }",
+           "Default true: destroy purga il Key Vault dal soft delete"),
+          ("State", "Backend con versioning, soft delete, lock, solo Entra ID",
+           "Senza state, Terraform non sa cosa gestisce"),
+          ("Bicep", "What-If; deployment stack con denyDelete e detachAll",
+           "Complete cancella ciò che non è nel template"),
+          ("Storage", "Soft delete blob e container, versioning, point-in-time",
+           "Default solo dal portale: in Terraform va dichiarato"),
+          ("Key Vault", "Purge protection",
+           "Facoltativa, ma una volta attiva è irreversibile"),
+          ("Azure SQL", "Soft delete del server logico (preview), backup LTR",
+           "Spento sui server < 2 anni: delete del server definitivo"),
+          ("Azure Backup", "Soft delete always-on, immutabilità, MUA (Resource Guard)",
+           "Attivo di default, ma si spegne finché non è always-on"),
+          ("Azure", "Lock CanNotDelete, Policy DenyAction, PIM",
+           "Valgono anche fuori dalla pipeline")],
+      (1.65, 5.6, 5.15), x=0.45, y=1.5, row_h=0.42, size=13, head_size=14)
+source(s, "Fonti: Microsoft Learn (Storage, Key Vault, Azure SQL, Azure Backup, deployment stacks), "
+          "HashiCorp lifecycle, azurerm features block. Verificate a novembre 2026.")
 
 s = new("Solo titolo", "Da portare a casa", """
 [41:00–42:15] Tre frasi, lente. Se il pubblico se ne ricorda una sola, va bene lo stesso.
@@ -863,7 +906,7 @@ for i, (h, b) in enumerate(take):
 box(s, 0.6, 5.2, 12.1, 0.9, "Copilot accelera. La piattaforma decide.", fill=RED, size=26, bold=True)
 
 s = new("Titolo e contenuto", "Grazie! Codice, demo e fonti", """
-[42:15–43:45] Lascio il QR sullo schermo per il Q&A: è il modo più semplice per chi vuole rifare la demo.
+[42:15–43:30] Lascio il QR sullo schermo per il Q&A: è il modo più semplice per chi vuole rifare la demo.
 Domande probabili, con una risposta breve:
 - «E se l'agente modifica il gate?» Il gate sta nello stesso repository, ma i file della piattaforma (gate, workflow, test, bootstrap, moduli) hanno in CODEOWNERS un proprietario diverso da me: una PR che li tocca resta ferma finché non approva lui, chiunque l'abbia scritta, io o Copilot. I file dei team invece non hanno proprietario, ed è lì che lavora l'agente. E se qualcuno riconfigura GitHub, identità, policy e lock non dipendono dal repository.
 - «Perché non basta Azure Policy?» Perché la policy valuta la singola richiesta, non il piano: non sa che quel delete fa parte di un replace.
