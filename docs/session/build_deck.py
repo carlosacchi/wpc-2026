@@ -223,11 +223,6 @@ def ph(s, idx):
     return next(p for p in s.placeholders if p.placeholder_format.idx == idx)
 
 
-def drop(s, idx):
-    p = ph(s, idx)
-    p._element.getparent().remove(p._element)
-
-
 def fill_text(tf, items, size=None, color=None):
     """items: str, (str, level) or (str, level, {'bold':..,'color':..})."""
     tf.clear()
@@ -324,7 +319,9 @@ def code(s, x, y, w, h, lines, size=12, title=None):
 
 
 def number(s, x, y, n, d=0.55, fill=RED):
-    return box(s, x, y, d, d, f"{n:02d}", fill=fill, size=16, bold=True, shape=MSO_SHAPE.OVAL)
+    badge = box(s, x, y, d, d, f"{n:02d}", fill=fill, size=16, bold=True, shape=MSO_SHAPE.OVAL)
+    badge.text_frame.margin_left = badge.text_frame.margin_right = Inches(0.02)
+    return badge
 
 
 def source(s, text):
@@ -360,18 +357,17 @@ def table(s, rows, widths, x=0.5, y=1.7, row_h=0.45, size=15, head_size=16, firs
     return tbl
 
 
-def columns(s, cols, y=1.65, h=3.75, size=15, gap=0.2, x0=0.45, width=12.4):
-    """cols: list of (header, color, [bullets]). Header band + light body, same height for all columns."""
-    w = (width - gap * (len(cols) - 1)) / len(cols)
-    for i, (head, color, items) in enumerate(cols):
-        x = x0 + i * (w + gap)
-        box(s, x, y, w, 0.6, head, fill=color, size=17, bold=True)
-        body = box(s, x, y + 0.6, w, h - 0.6, ["• " + t for t in items], fill=LIGHT, fg=INK, size=size,
-                   align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
-        body.text_frame.margin_left = body.text_frame.margin_right = Inches(0.15)
-        body.text_frame.margin_top = Inches(0.12)
-        for p in body.text_frame.paragraphs:
-            p.space_after = Pt(6)
+def visual_cards(s, cards, y=1.85):
+    """Three editable PowerPoint cards: (icon shape, color, heading, short captions)."""
+    w = 3.95
+    for i, (icon, color, head, captions) in enumerate(cards):
+        x = 0.6 + i * 4.1
+        box(s, x, y, w, 3.1, fill=LIGHT)
+        box(s, x + (w - 0.6) / 2, y + 0.34, 0.6, 0.6, fill=color, shape=icon)
+        label(s, x + 0.1, y + 1.12, w - 0.2, 0.72, head,
+              size=22, bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        label(s, x + 0.15, y + 1.95, w - 0.3, 0.95, captions,
+              size=18, color=GREY, align=PP_ALIGN.CENTER)
 
 
 def section(n, title, sub, notes):
@@ -444,46 +440,34 @@ label(s, 0.6, 2.2, 5.6, 2.6, [("L'agente scrive in secondi.", {"size": 36, "bold
                              ("Chi decide cosa arriva in Azure?", {"size": 30, "color": ORANGE})], color=WHITE)
 
 # ---------------------------------------------------------------- 3. Agenda
-s = new("Agenda", "Agenda", """
+s = new("Solo titolo", "Agenda", """
 [2:00–2:30] Trenta secondi. Faccio notare una sola cosa: la demo sta al centro e prende un terzo del tempo.
 - Ci arriviamo con due incidenti veri; dopo la demo parliamo di come si torna indietro e di cosa il lab NON dimostra.
 - Annunciare subito che c'è una slide di limiti dichiarati crea fiducia: chi è scettico si rilassa.
 """)
-fill_text(ph(s, 1).text_frame, [
-    "Il caso: lo scope sbagliato, eseguito correttamente",
-    "Quando a scrivere è un agente",
-    "Una piattaforma che decide al posto di chi scrive",
-    "Demo live: Copilot, PR, gate, approvazione, canary",
-    "Rollback come roll-forward, limiti, takeaway",
-], size=24)
+for i, title in enumerate(("Gli incidenti", "Entrano gli agenti", "La piattaforma", "Demo live", "Rollback e limiti")):
+    x = 0.6 + i * 2.45
+    color = RED if i == 3 else NAVY
+    number(s, x + 0.8, 2.35, i + 1, d=0.6, fill=color)
+    box(s, x, 3.1, 2.2, 0.9, title, fill=LIGHT, fg=color, size=20, bold=True)
+    if i < 4:
+        arrow(s, x + 1.52, 2.65, x + 3.13, 2.65)
 
 # ---------------------------------------------------------------- Glossary (short, on stage)
-# (term, general definition, meaning in this session) — kept in alphabetical order
+# (term, stage cue) — kept in alphabetical order
 WORDS = sorted([
-    ("Canary / ring", "Rilascio graduale: il cambiamento va prima a un gruppo ristretto e si allarga solo se resta sano.",
-     "Ring 0 è Sales, ring 1 è Operations: Operations parte solo se Sales è sano."),
-    ("DenyAction e lock", "Protezioni dentro Azure: una Azure Policy che rifiuta un'azione e un blocco contro la cancellazione.",
-     "Rifiutano il delete degli Storage anche a chi passa fuori dalla pipeline."),
-    ("Environment GitHub", "In GitHub Actions, una destinazione di deploy con regole proprie: revisori, branch ammessi, variabili.",
-     "Il rollout si ferma finché un revisore, diverso da chi l'ha lanciato, non approva."),
-    ("Gate", "Controllo automatico in pipeline che fa proseguire o blocca un rilascio in base a regole esplicite.",
-     "Legge terraform plan e Bicep What-If e risponde PASS o DENY."),
-    ("IaC", "Infrastructure as Code: infrastruttura descritta in file versionati e applicata da strumenti, non a mano.",
-     "Terraform per i deploy, Bicep solo per l'anteprima What-If."),
-    ("Managed Identity (MI)", "Identità Azure senza password, gestita da Entra ID, con cui un servizio o una pipeline accede alle risorse.",
-     "Una per il plan; una di apply per ogni tenant, limitata al suo resource group."),
-    ("MCP", "Model Context Protocol: protocollo aperto con cui un agente AI usa strumenti e dati esterni.",
-     "Azure MCP Server dà a Copilot accesso ad Azure, con le credenziali di chi lo avvia."),
-    ("OIDC", "OpenID Connect: standard per dimostrare un'identità con token firmati e a scadenza.",
-     "GitHub Actions ottiene un token Azure senza secret salvati (federazione delle identità)."),
-    ("Plan / What-If", "L'anteprima di un cambiamento: cosa verrà creato, modificato o cancellato, prima di farlo.",
-     "terraform plan e ARM What-If sullo stesso resource group, letti dai gate."),
-    ("Platform Engineering", "Disciplina che costruisce piattaforme interne self-service, con le regole già incluse, per chi sviluppa.",
-     "La piattaforma decide cosa arriva in Azure, non chi scrive il codice."),
-    ("Replace  -/+", "Un cambiamento che non si applica sul posto: la risorsa viene cancellata e ricreata.",
-     "Rinominare lo Storage di Sales: con dei dati dentro, vuol dire perderli."),
-    ("Tenant", "Un cliente o un gruppo isolato che condivide la stessa piattaforma. In Azure è anche la directory Entra ID.",
-     "Un team (Sales, Operations) con il suo resource group, state, identità ed environment."),
+    ("Canary / ring", "Prima Sales; Operations solo se Sales è sano"),
+    ("DenyAction e lock", "Bloccano il delete anche fuori dalla pipeline"),
+    ("Environment GitHub", "Il deploy aspetta un revisore"),
+    ("Gate", "Legge le anteprime → PASS o DENY"),
+    ("IaC", "Terraform per il deploy, Bicep per il What-If"),
+    ("Managed Identity (MI)", "Identità Azure senza password"),
+    ("MCP", "Collega Copilot a strumenti e dati Azure"),
+    ("OIDC", "Token temporanei, niente secret salvati"),
+    ("Plan / What-If", "Anteprima di ciò che cambia in Azure"),
+    ("Platform Engineering", "Self-service con regole di rilascio"),
+    ("Replace  -/+", "Cancella e ricrea la risorsa"),
+    ("Tenant", "Qui: un team, non una directory Entra"),
 ], key=lambda w: w[0].lower())
 WORD_NOTES = [
     """Le parole, prima metà. Non le leggo: sono qui perché in sala ci sono profili diversi, e chi fa sviluppo applicativo non deve perdersi al minuto 15. Il deck completo ha un glossario più lungo in fondo.
@@ -497,13 +481,11 @@ WORD_NOTES = [
 ]
 for n, half in enumerate((WORDS[:6], WORDS[6:])):
     s = new("Solo titolo", f"Le parole di questa sessione ({n + 1}/2)", WORD_NOTES[n], mins=0.5)
-    for i, (term, general, here) in enumerate(half):
+    for i, (term, cue) in enumerate(half):
         r_, c = divmod(i, 2)
         x, y = 0.45 + c * 6.3, 1.6 + r_ * 1.62
-        b = box(s, x, y, 6.1, 1.5, [(term, {"size": 17, "bold": True, "color": RED}),
-                                    (general, {"size": 14}),
-                                    ("**Qui:** " + here, {"size": 14, "color": GREY})],
-                fill=LIGHT, fg=INK, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        b = box(s, x, y, 6.1, 1.32, [(term, {"size": 21, "bold": True, "color": RED}),
+                                     (cue, {"size": 17})], fill=LIGHT, fg=INK, align=PP_ALIGN.LEFT)
         b.text_frame.margin_left = b.text_frame.margin_right = Inches(0.15)
 
 # ---------------------------------------------------------------- Act 1
@@ -511,7 +493,7 @@ section(1, "Lo scope sbagliato, eseguito correttamente", "Due post-mortem pubbli
 [2:30] «Prima di parlare di AI, due incidenti in cui l'AI non c'entra niente.» Il problema esisteva già: l'agente lo accelera, non lo inventa.
 """)
 
-s = new("Due colonne", "Atlassian, aprile 2022", """
+s = new("Solo titolo", "Atlassian, aprile 2022", """
 [2:30–4:45] Atlassian, raccontato come una storia e non come un elenco.
 - Aprile 2022: un team deve dismettere un'app legacy, Insight. Lo script di manutenzione è corretto e fa esattamente il suo lavoro: cancella in modo permanente gli oggetti di cui riceve gli ID.
 - Il problema è l'input. Invece degli ID dell'app riceve gli ID dei siti dei clienti. Tutto il resto funziona perfettamente.
@@ -520,15 +502,12 @@ s = new("Due colonne", "Atlassian, aprile 2022", """
 - Le azioni correttive sono tutte di piattaforma: soft delete ovunque, staged rollout, rollback testato. Nessuna è «scrivere script migliori».
 - L'immagine: si voleva colpire il quadratino bianco, la cornice rossa ha preso l'isolato.
 """)
-fill_text(ph(s, 1).text_frame, [
-    "Uno script doveva rimuovere un'app legacy",
-    "Ha ricevuto gli ID dei **siti**, non dell'app",
-    "Cancellazione permanente: **883 siti, 775 clienti**",
-    "Ripristino fino a **14 giorni**",
-    "Il PIR: nessun controllo che gli ID fossero quelli giusti",
-    ("Azioni: soft delete, staged rollout, rollback testato", 1),
-], size=20)
-drop(s, 2)
+label(s, 0.6, 1.9, 5.85, 0.65, "ID dei siti, non dell'app", size=26, bold=True)
+for i, (value, caption) in enumerate((("883", "siti cancellati"), ("775", "clienti colpiti"), ("14", "giorni di ripristino\n(fino a)"))):
+    x = 0.6 + i * 1.95
+    label(s, x, 2.85, 1.85, 0.75, value, size=39, color=RED, bold=True)
+    label(s, x, 3.65, 1.85, 0.9, caption.split("\n"), size=16, color=GREY)
+box(s, 0.6, 4.95, 5.8, 0.7, "Nessun controllo sullo scope", fill=LIGHT, fg=RED, size=19, bold=True)
 picture(s, "wrong-scope.jpg", 6.75, 1.63, w=6.08)
 source(s, "atlassian.com/engineering/post-incident-review-april-2022-outage")
 
@@ -540,6 +519,7 @@ s = new("Solo titolo", "Azure DevOps, maggio 2023", """
 - Ring 1, South Brazil: la condizione c'è. Diciassette database di produzione, circa dieci ore di disservizio.
 - Lo dico ad alta voce: il canary riduce il raggio d'azione, non verifica l'effetto. Se il ring 0 non contiene il caso critico, non ti protegge.
 - Tra le correzioni di Microsoft c'è il resource lock sui server SQL di produzione. Tenetelo a mente: nella demo il lock c'è, e un delete lanciato a mano lo fermerà Azure stesso, fuori dalla pipeline.
+- Le altre correzioni: test sull'intero ciclo di vita del job e snapshot su server separati da quelli di produzione.
 """)
 steps = [("PR enorme\nmigrazione SDK", NAVY), ("Refuso:\ndelete DB → delete SQL Server", NAVY),
          ("Ring 0 interno\nnessuno snapshot → OK", GREEN), ("Ring 1 South Brazil\n17 DB cancellati, ~10 h", RED)]
@@ -548,12 +528,8 @@ for i, (t, c) in enumerate(steps):
     box(s, x, 2.0, 2.75, 1.5, t.split("\n"), fill=c, size=18)
     if i < 3:
         arrow(s, x + 2.78, 2.75, x + 3.12, 2.75)
-label(s, 0.6, 3.9, 12, 0.5, "Correzioni pubblicate", size=18, color=RED, bold=True)
-label(s, 0.6, 4.4, 12, 1.6, [
-    "• Test sull'intero ciclo di vita del job di pulizia",
-    "• **Resource lock** sui server SQL di produzione",
-    "• Snapshot su server separati da quelli di produzione",
-], size=18)
+box(s, 0.6, 4.25, 12.1, 0.8, "Un canary non protegge da un caso che non prova.",
+    fill=LIGHT, fg=RED, size=22, bold=True)
 source(s, "status.dev.azure.com/_event/392143683/post-mortem")
 
 s = new("Solo titolo", "Lo schema comune", """
@@ -564,14 +540,11 @@ s = new("Solo titolo", "Lo schema comune", """
 - Frase da dire guardando la sala: il problema non è chi scrive il cambiamento. È cosa lo lascia passare.
 - Ponte: adesso al posto della persona mettete un agente, che scrive dieci volte più velocemente e non si stanca mai di aprire PR.
 """)
-cols = [("Scope più ampio del previsto", "Sito invece di app, server invece di database"),
-        ("Sintassi valida, effetto distruttivo", "Il codice passa i test; l'effetto si vede solo nel piano"),
-        ("Nessun livello indipendente", "Tra il comando e l'irreversibile non c'è nulla che dica no")]
-for i, (h, b) in enumerate(cols):
-    x = 0.6 + i * 4.2
-    number(s, x + 1.6, 1.9, i + 1, d=0.8)
-    label(s, x, 2.9, 3.8, 0.6, h, size=20, bold=True, align=PP_ALIGN.CENTER)
-    label(s, x, 3.55, 3.8, 1.2, b, size=16, color=GREY, align=PP_ALIGN.CENTER)
+visual_cards(s, [
+    (MSO_SHAPE.HEXAGON, NAVY, "Scope sbagliato", ["Sito, non app", "Server, non database"]),
+    (MSO_SHAPE.LIGHTNING_BOLT, RED, "Codice valido", ["Effetto distruttivo"]),
+    (MSO_SHAPE.NO_SYMBOL, RED, "Nessun blocco", ["Nessun controllo indipendente"]),
+])
 box(s, 0.6, 5.2, 12.1, 0.9, "Il problema non è chi scrive il cambiamento. È cosa lo lascia passare.",
     fill=LIGHT, fg=RED, size=22, bold=True)
 
@@ -587,37 +560,23 @@ s = new("Solo titolo", "Casi agentici: stesso schema", """
 - Amazon Q, luglio 2025. Qui l'agente è la vittima: un token GitHub con permessi troppo ampi, nella configurazione di build, ha permesso di inserire codice malevolo nell'estensione per VS Code, finito in automatico nella release 1.84.0. Non ha fatto danni solo perché conteneva un errore di sintassi. Lo dico così: siamo stati fortunati, non protetti.
 - Chiusura: nessuna di queste è una storia contro gli agenti. Sono storie di piattaforme senza confini.
 """)
-rows = [("Caso", "Cosa è successo", "Lezione"),
-        ("PocketOS\naprile 2026", "Un agente in staging usa un token trovato in un file non correlato: una chiamata API cancella database e backup",
-         "Le credenziali raggiungibili sono il perimetro reale dell'agente"),
-        ("Replit\nluglio 2025", "Durante un code freeze dichiarato, l'agente cancella il database di produzione",
-         "Un'istruzione in linguaggio naturale non è un controllo"),
-        ("Amazon Q\nluglio 2025", "Un token GitHub con permessi eccessivi fa entrare codice malevolo nella release; non parte solo per un errore di sintassi (AWS-2025-015)",
-         "La supply chain dell'agente è superficie d'attacco")]
-table(s, rows, (2.2, 6.0, 4.1), row_h=1.1)
+visual_cards(s, [
+    (MSO_SHAPE.CAN, RED, "PocketOS", ["Token troppo ampio", "Database e backup persi"]),
+    (MSO_SHAPE.FOLDED_CORNER, RED, "Replit", ["Code freeze ignorato", "Database cancellato"]),
+    (MSO_SHAPE.GEAR_6, RED, "Amazon Q", ["Build troppo privilegiata", "Release compromessa"]),
+], y=2.1)
 source(s, "The Register, 27/04/2026 · AWS Security Bulletin AWS-2025-015 · dettagli in docs/case-study.md")
 
 s = new("Solo titolo", "Copilot: cosa sa e cosa non decide", """
 [10:45–13:15] - La review del Code Owner serve per modificare gate e workflow; l'approvazione dell'Environment serve per applicare il workload.
 - Senza una review richiesta nelle regole del repository, una PR può essere unita senza approvazione.
 - L'agent mode usa il terminale dell'utente e quindi può ereditare le sue credenziali Azure.
+- Distingui cloud agent e agent mode in VS Code: il cloud agent può aprire una PR ma non approvarla; GitHub può chiedere un'approvazione per i workflow. In VS Code le richieste di conferma convivono con opzioni di auto-approvazione.
 """)
-columns(s, [
-    ("Protezioni già presenti", NAVY, [
-        "Copilot apre una PR, ma non può approvarla",
-        "GitHub può chiedere approvazione prima dei workflow della PR",
-        "VS Code chiede conferma; è possibile attivare l'auto-approvazione",
-        "Le istruzioni guidano l'agente, ma non sono un blocco"]),
-    ("Cosa può sapere oggi", TEAL, [
-        "Update o replace: dalla doc del provider o leggendo un plan",
-        "Lo stato reale: risorse, policy, ruoli, con Azure MCP Server",
-        "Le regole della piattaforma, se legge il gate nel repo",
-        "Per vedere Azure servono credenziali: di chi?"]),
-    ("Cosa non deve decidere", RED, [
-        "Se il cambio arriva in produzione",
-        "Con quali credenziali agire",
-        "Chi approva: senza review richiesta, la PR può essere unita",
-        "Se cambiare le protezioni che lo bloccano"]),
+visual_cards(s, [
+    (MSO_SHAPE.FOLDED_CORNER, NAVY, "Propone", ["Codice e pull request"]),
+    (MSO_SHAPE.HEXAGON, TEAL, "Osserva", ["Piano, risorse, policy"]),
+    (MSO_SHAPE.NO_SYMBOL, RED, "Non decide", ["Permessi, merge, rilascio"]),
 ])
 box(s, 0.45, 5.65, 12.4, 0.75, "Sapere non è decidere.  Istruzioni = guida · Gate = controllo.",
     fill=LIGHT, fg=RED, size=20, bold=True)
@@ -632,28 +591,17 @@ s = new("Solo titolo", "Azure MCP Server: contesto, non giudizio", """
 - Consiglio pratico: versione fissata, --read-only, solo i namespace che servono.
 - Chiusura: MCP migliora la proposta. Non sostituisce il gate.
 """, mins=1.75)
-flow = [("Copilot", "il modello sceglie quale tool chiamare", NAVY),
-        ("VS Code", "client MCP: mostra la chiamata e chiede conferma", VIOLET),
-        ("Azure MCP Server", "traduce in chiamate Azure", TEAL),
-        ("Azure + RBAC", "con le credenziali di chi lo avvia", RED)]
-for i, (h, b, c) in enumerate(flow):
+flow = [("Copilot", NAVY), ("VS Code", VIOLET), ("Azure MCP Server", TEAL), ("Azure + RBAC", RED)]
+for i, (h, c) in enumerate(flow):
     x = 0.45 + i * 3.12
-    box(s, x, 1.6, 3.0, 0.7, h, fill=c, size=17, bold=True, shape=MSO_SHAPE.CHEVRON if i else MSO_SHAPE.PENTAGON)
-    label(s, x + 0.1, 2.35, 2.8, 0.7, b, size=13, color=GREY, align=PP_ALIGN.CENTER)
-columns(s, [
-    ("Cosa porta", TEAL, [
-        "Stato reale: risorse, policy assegnate, ruoli",
-        "Conoscenza curata: doc del provider, regole IaC",
-        "Terraform: conftest sulla policy library AVM",
-        "Read-only e filtro per namespace o singolo tool"]),
-    ("Cosa non risolve", RED, [
-        "Usa le credenziali di chi lo avvia: az login o MI",
-        "Policy e RBAC solo in lettura; crea Storage e carica blob",
-        "Il comando az lo genera: lo esegue il tuo terminale",
-        "I tool cambiano tra versioni: fissare la versione"]),
-], y=3.0, h=2.5, size=15)
-box(s, 0.45, 5.7, 12.4, 0.7, "Porta contesto, non giudizio. Quello che scrive in Azure non passa da plan, gate e approvazione.",
-    fill=LIGHT, fg=RED, size=17, bold=True)
+    box(s, x, 1.85, 3.0, 0.8, h, fill=c, size=18, bold=True, shape=MSO_SHAPE.CHEVRON if i else MSO_SHAPE.PENTAGON)
+for i, (h, b) in enumerate((("Cosa vede", "Risorse, policy, ruoli e documentazione"),
+                            ("Con quale identità", "Credenziali di chi lo avvia"))):
+    x = 0.6 + i * 6.15
+    box(s, x, 3.05, 5.95, 1.65, [(h, {"size": 23, "bold": True, "color": RED}), (b, {"size": 18})],
+        fill=LIGHT, fg=INK)
+box(s, 0.6, 5.15, 12.1, 0.85, "Versione fissata  ·  --read-only  ·  Solo i tool necessari",
+    fill=LIGHT, fg=RED, size=20, bold=True)
 source(s, "learn.microsoft.com/azure/developer/azure-mcp-server · Azure MCP Server 3.0, ottobre 2026")
 
 # ---------------------------------------------------------------- Act 3
@@ -670,18 +618,14 @@ s = new("Solo titolo", "Tenant simulati, confini reali", """
 """)
 box(s, 0.45, 1.6, 12.4, 4.85, fill=None, line=GREY)
 label(s, 0.75, 1.68, 6, 0.4, "Subscription · una directory Entra", size=13, color=GREY)
-cards = [("wpc-2026 · piattaforma", VIOLET, ["Storage di state (lock)", "Container tfstate-<tenant>", "MI plan: lettura, what-if, state",
-                                            "Policy: Deny + DenyAction"]),
-         ("wpc-2026-sales · ring 0", TEAL, ["Storage wpc26salesb0b966", "MI apply sales: solo questo RG", "Environment «sales»",
-                                           "Lock CanNotDelete + DenyAction"]),
-         ("wpc-2026-operations · ring 1", BLUE, ["Storage wpc26opsb0b966", "MI apply ops: solo questo RG",
-                                                "Environment «operations»", "Lock CanNotDelete + DenyAction"])]
+cards = [("Piattaforma", VIOLET, ["State per team", "Identità di plan condivisa", "Deny + DenyAction"]),
+         ("Sales · ring 0", TEAL, ["Resource group Sales", "Identità di apply Sales", "Environment «sales»"]),
+         ("Operations · ring 1", BLUE, ["Resource group Operations", "Identità di apply Operations", "Environment «operations»"])]
 for i, (h, c, items) in enumerate(cards):
     x = 0.75 + i * 4.1
     box(s, x, 2.1, 3.8, 0.6, h, fill=c, size=16, bold=True)
-    box(s, x, 2.7, 3.8, 2.6, ["• " + t for t in items], fill=LIGHT, fg=INK, size=17, align=PP_ALIGN.LEFT,
-        anchor=MSO_ANCHOR.TOP)
-box(s, 0.75, 5.55, 12.0, 0.7, "La mappa tenant → resource group sta nel gate della piattaforma, non nei file dei team",
+    box(s, x, 2.7, 3.8, 2.6, items, fill=LIGHT, fg=INK, size=18)
+box(s, 0.75, 5.55, 12.0, 0.7, "Il gate controlla la mappa tenant → resource group",
     fill=WHITE, fg=RED, size=16, bold=True, line=RED)
 
 s = new("Solo titolo", "Il flusso di un ring", """
@@ -697,7 +641,8 @@ flow = [("PR", "CI validate\nsenza credenziali", GREY), ("Plan", "terraform plan
         ("Apply", "MI del tenant\nstesso piano, sha256", TEAL), ("Verify", "privato, lock,\npolicy, no drift", GREEN)]
 for i, (h, b, c) in enumerate(flow):
     x = 0.45 + i * 2.1
-    box(s, x, 1.9, 1.9, 0.75, h, fill=c, size=17, bold=True, shape=MSO_SHAPE.CHEVRON if i else MSO_SHAPE.PENTAGON)
+    box(s, x, 1.9, 1.9, 0.75, h, fill=c, fg=INK if c == ORANGE else WHITE,
+        size=17, bold=True, shape=MSO_SHAPE.CHEVRON if i else MSO_SHAPE.PENTAGON)
     label(s, x, 2.75, 1.9, 1.1, b.split("\n"), size=13, align=PP_ALIGN.CENTER)
 lanes = [("Chi agisce", INK, ["Copilot + persona", "MI plan", "MI plan", "Revisore umano", "MI apply sales", "MI plan"])]
 for i, who in enumerate(lanes[0][2]):
@@ -716,17 +661,12 @@ s = new("Vuota", "Cinque livelli, ognuno presuppone che il precedente fallisca",
 - Se qualcuno chiede perché così tanti livelli: perché ognuno ha un buco. Il gate è codice nello stesso repository, protetto solo dalla review del suo code owner; l'approvazione dipende da una persona attenta; la policy da come è scritta. Perché passi un errore, i buchi devono allinearsi tutti.
 """)
 picture(s, "defense-layers.jpg", 0, 0, w=13.333)
-label(s, 8.85, 0.45, 4.3, 1.4, "Cinque livelli, ognuno presuppone che il precedente fallisca", size=24, color=WHITE, bold=True)
-layers = [("Gate in CI", "plan + what-if: niente delete, replace, fuori tenant"),
-          ("Approvazione umana", "environment del tenant, no self-review"),
-          ("Identità per tenant", "apply limitato al proprio RG e al proprio state"),
-          ("Azure Policy DenyAction", "nessun delete degli Storage del lab"),
-          ("Resource lock", "CanNotDelete sui RG dei tenant e sullo state")]
-for i, (h, b) in enumerate(layers):
+label(s, 8.85, 0.65, 4.3, 1.1, "Cinque livelli di difesa", size=28, color=WHITE, bold=True)
+layers = ["Gate in CI", "Approvazione umana", "Identità per tenant", "Azure Policy DenyAction", "Resource lock"]
+for i, h in enumerate(layers):
     y = 2.0 + i * 0.95
     number(s, 8.85, y, i + 1, d=0.6, fill=[TEAL, BLUE, VIOLET, RED, RED][i])
-    label(s, 9.55, y - 0.08, 3.7, 0.45, h, size=19, color=WHITE, bold=True)
-    label(s, 9.55, y + 0.32, 3.7, 0.6, b, size=13, color=CODE_FG)
+    label(s, 9.55, y, 3.7, 0.6, h, size=19, color=WHITE, bold=True, anchor=MSO_ANCHOR.MIDDLE)
 
 s = new("Solo titolo", "Una rinomina, due rischi", """
 [21:00–23:00] La slide tecnica più importante: chi capisce questa, capisce la demo.
@@ -777,11 +717,11 @@ s = new("Solo titolo", "Cosa guardare durante la demo", """
 - Passo 5: delete dello Storage dal terminale fuori da VS Code, come Owner della subscription. Risposta attesa: RequestDisallowedByPolicy; se risponde prima il lock, ScopeLocked. In entrambi i casi non si cancella niente, e non c'è nessuna pipeline di mezzo.
 - Se avanza tempo: nella prova generale del 10 novembre lo script di reset si è fermato a metà per un bug, corretto il giorno dopo. Un buon esempio del perché si prova tutto, anche il rollback.
 """)
-demo = [("Copilot rinomina lo Storage di Sales", "PR verde: validate non vede il problema"),
-        ("Rollout: due DENY", "plan -/+ e what-if orfano · nessun artefatto, nessuna approvazione"),
-        ("Copilot corregge", "nome originale + service_label → solo un tag"),
-        ("Approvazione e canary", "il revisore approva · apply · health · ring 1"),
-        ("Rete di sicurezza", "delete diretto da Owner → RequestDisallowedByPolicy")]
+demo = [("Rinomina", "PR verde"),
+        ("Doppio DENY", "Nessuna richiesta di approvazione"),
+        ("Correzione", "Cambia solo un tag"),
+        ("Approvazione e canary", "Sales → HEALTHY"),
+        ("Delete fuori pipeline", "Azure lo blocca")]
 for i, (h, b) in enumerate(demo):
     y = 1.7 + i * 0.98
     number(s, 0.6, y, i + 1, d=0.7, fill=RED if i in (1, 4) else NAVY)
@@ -817,7 +757,8 @@ rb = [("Baseline versionata", "demo/baseline/", NAVY), ("Cambi in sessione", "fi
       ("Azure riallineato", "in-place, zero delete", GREEN)]
 for i, (h, b, c) in enumerate(rb):
     x = 0.45 + i * 2.52
-    box(s, x, 1.9, 2.2, 1.3, [(h, {"bold": True, "size": 16}), (b, {"size": 13})], fill=c)
+    box(s, x, 1.9, 2.2, 1.3, [(h, {"bold": True, "size": 16}), (b, {"size": 13})],
+        fill=c, fg=INK if c == ORANGE else WHITE)
     if i < 4:
         arrow(s, x + 2.22, 2.55, x + 2.5, 2.55)
 code(s, 0.45, 3.6, 6.6, 2.5, [
@@ -834,25 +775,23 @@ box(s, 7.35, 3.6, 5.5, 2.5, [("Teardown = break-glass", {"bold": True, "size": 2
                             ("3. Delete, con approvazione esplicita", {"size": 16})],
     fill=LIGHT, fg=INK, align=PP_ALIGN.LEFT)
 
-s = new("Titolo e contenuto", "Limiti dichiarati", """
+s = new("Solo titolo", "Limiti dichiarati", """
 [39:15–40:15] Questi limiti li dico io, prima che li trovi qualcuno in sala.
 - Il più importante sono i ruoli ereditati. Chi è Contributor sulla subscription attraversa tutti i tenant, perché RBAC eredita verso il basso. Policy e lock restano, ma la separazione tra team no. Mi è successo: nel mio lab il revisore era Contributor sulla subscription, e l'ho tolto preparando questa sessione. Controllate i vostri.
 - Il canary qui è per team: non c'è traffico da spostare, quindi niente split al 5%.
 - La DenyAction protegge gli Storage che hanno il tag del progetto: chi può cambiare quel tag li fa uscire dalla policy. Il lock resta.
 - Il lab protegge il control plane, non i dati: bloccare la cancellazione dello Storage non impedisce di cancellare i blob dentro.
 - Chi amministra il repository può cambiare branch protection ed environment. Per questo policy e lock stanno in Azure: chi controlla GitHub non li controlla automaticamente.
+- Il What-If con ProviderNoRbac non verifica i permessi di scrittura. I gate del lab sono regole didattiche, non uno scanner di sicurezza completo.
 """)
-fill_text(ph(s, 1).text_frame, [
-    "**Una directory, una subscription:** isolamento per RG, identità, state e policy. Ruoli ereditati sulla subscription lo attraversano",
-    "**Canary per tenant**, non uno split di traffico",
-    "**What-if è un preview:** con ProviderNoRbac non verifica i permessi di scrittura",
-    "**DenyAction copre solo il delete** degli Storage del progetto: il replace lo ferma il gate",
-    "**I gate sono regole didattiche esplicite**, non uno scanner di sicurezza completo",
-    "**Chi amministra il repo** può riconfigurare branch protection ed environment",
-], size=20)
+visual_cards(s, [
+    (MSO_SHAPE.HEXAGON, NAVY, "Isolamento per RG", ["I ruoli ereditati lo attraversano"]),
+    (MSO_SHAPE.CHEVRON, TEAL, "Canary per team", ["Nessuno split di traffico"]),
+    (MSO_SHAPE.CAN, RED, "Control plane", ["I blob non sono protetti"]),
+], y=2.0)
 
 s = new("Solo titolo", "Protezioni spesso spente", """
-[40:15–41:15] La slide da fotografare. Non la leggo riga per riga: scelgo due o tre righe in base alla sala.
+[40:15–41:15] Tre famiglie di protezioni. Scelgo due o tre esempi in base alla sala; la tabella completa è in appendice.
 - prevent_destroy accetta solo valori letterali: non si può accendere con una variabile solo in prod. Se il modulo è condiviso tra gli ambienti, di fatto è acceso ovunque.
 - prevent_destroy non è un controllo di sicurezza: se qualcuno, persona o agente, cancella il blocco resource o il lifecycle, Terraform distrugge senza avvisare. Per questo serve anche la review dei moduli (qui: CODEOWNERS) e, fuori da Terraform, lock e policy. Per togliere una risorsa dal codice senza distruggerla c'è il blocco removed con lifecycle { destroy = false }.
 - Nel lab prevent_destroy è sullo state e sui RG dei tenant, non sullo Storage: lì Terraform fermerebbe il piano prima del gate e nella demo non vedreste il gate.
@@ -863,7 +802,14 @@ s = new("Solo titolo", "Protezioni spesso spente", """
 - Bicep: con un deployment stack in denyDelete e detachAll, togliere una risorsa dal template non la cancella e nessuno la cancella a mano.
 - Domanda probabile: «prevent_destroy su tutti gli ambienti o solo in prod?» Su tutti gli ambienti stabili, sulle risorse che custodiscono dati, chiavi o state: stesso comportamento ovunque, e la procedura per superarlo si impara in dev, non in prod durante un incidente. Non su tutto: su risorse senza dati blocca replace legittimi e insegna a toglierlo per riflesso. Negli ambienti effimeri, per esempio uno per PR, il teardown passa da una procedura esplicita.
 """)
-table(s, [("Dove", "Attivare o verificare", "Perché: default e trappole"),
+visual_cards(s, [
+    (MSO_SHAPE.FOLDED_CORNER, NAVY, "Nel codice", ["Gate sul piano", "prevent_destroy · denyDelete"]),
+    (MSO_SHAPE.CAN, TEAL, "Sui dati", ["Soft delete · backup", "Ripristini provati"]),
+    (MSO_SHAPE.NO_SYMBOL, RED, "In Azure", ["Resource lock · DenyAction", "Purge protection"]),
+])
+label(s, 0.6, 5.65, 12.1, 0.5, "Checklist completa in appendice", size=17, color=GREY, align=PP_ALIGN.CENTER)
+
+PROTECTION_ROWS = [("Dove", "Attivare o verificare", "Perché: default e trappole"),
           ("Terraform", "prevent_destroy su state, dati, chiavi, database",
            "Se il blocco sparisce dal codice, sparisce la protezione"),
           ("Terraform", "Gate sul plan (niente -/+ o delete); apply del plan salvato",
@@ -883,10 +829,7 @@ table(s, [("Dove", "Attivare o verificare", "Perché: default e trappole"),
           ("Azure Backup", "Soft delete always-on, immutabilità, MUA (Resource Guard)",
            "Attivo di default, ma si spegne finché non è always-on"),
           ("Azure", "Lock CanNotDelete, Policy DenyAction, PIM",
-           "Valgono anche fuori dalla pipeline")],
-      (1.65, 5.6, 5.15), x=0.45, y=1.5, row_h=0.42, size=13, head_size=14)
-source(s, "Fonti: Microsoft Learn (Storage, Key Vault, Azure SQL, Azure Backup, deployment stacks), "
-          "HashiCorp lifecycle, azurerm features block. Verificate a novembre 2026.")
+           "Valgono anche fuori dalla pipeline")]
 
 s = new("Solo titolo", "Da portare a casa", """
 [41:00–42:15] Tre frasi, lente. Se il pubblico se ne ricorda una sola, va bene lo stesso.
@@ -895,38 +838,31 @@ s = new("Solo titolo", "Da portare a casa", """
 - La terza è per chi la notte vuole dormire: una rete di sicurezza dentro Azure, fuori dalla pipeline, perché prima o poi qualcuno la pipeline la aggira.
 - Pausa, poi la chiusura: «Copilot accelera. La piattaforma decide.»
 """)
-take = [("Decide il piano", "terraform plan e what-if, letti da un gate. Non validate, non la review del diff."),
-        ("Confini per tenant", "Identità, state e approvazione per tenant. Il raggio d'azione è architettura."),
-        ("Rete fuori dalla pipeline", "Policy e lock in Azure: valgono anche per chi aggira GitHub.")]
-for i, (h, b) in enumerate(take):
-    x = 0.6 + i * 4.2
-    number(s, x + 1.6, 1.9, i + 1, d=0.8)
-    label(s, x, 2.9, 3.8, 0.6, h, size=22, bold=True, align=PP_ALIGN.CENTER)
-    label(s, x, 3.55, 3.8, 1.4, b, size=16, color=GREY, align=PP_ALIGN.CENTER)
+visual_cards(s, [
+    (MSO_SHAPE.FOLDED_CORNER, NAVY, "Decide il piano", ["Plan e What-If → Gate"]),
+    (MSO_SHAPE.HEXAGON, TEAL, "Confini per tenant", ["Identità, state, approvazione"]),
+    (MSO_SHAPE.NO_SYMBOL, RED, "Controlli in Azure", ["Policy e lock fuori dalla CI"]),
+])
 box(s, 0.6, 5.2, 12.1, 0.9, "Copilot accelera. La piattaforma decide.", fill=RED, size=26, bold=True)
 
-s = new("Titolo e contenuto", "Grazie! Codice, demo e fonti", """
+s = new("Solo titolo", "Grazie!", """
 [42:15–43:30] Lascio il QR sullo schermo per il Q&A: è il modo più semplice per chi vuole rifare la demo.
 Domande probabili, con una risposta breve:
 - «E se l'agente modifica il gate?» Il gate sta nello stesso repository, ma i file della piattaforma (gate, workflow, test, bootstrap, moduli) hanno in CODEOWNERS un proprietario diverso da me: una PR che li tocca resta ferma finché non approva lui, chiunque l'abbia scritta, io o Copilot. I file dei team invece non hanno proprietario, ed è lì che lavora l'agente. E se qualcuno riconfigura GitHub, identità, policy e lock non dipendono dal repository.
 - «Perché non basta Azure Policy?» Perché la policy valuta la singola richiesta, non il piano: non sa che quel delete fa parte di un replace.
 - «Funziona con Azure DevOps?» Il principio sì: environment con approvazioni e controlli, service connection con workload identity federation, lo stesso gate in uno step.
 - «Quanto costa il lab?» Quasi niente: due Storage praticamente vuoti più lo state. Identità e policy non costano.
-""")
-fill_text(ph(s, 1).text_frame, [
-    "Repository del lab: **github.com/carlosacchi/wpc-2026**",
-    ("Workflow, gate, bootstrap Terraform, test", 1),
-    ("docs/case-study.md: post-mortem e mappatura sui controlli", 1),
-    ("docs/session/demo-runbook.md: come rifare la demo", 1),
-    "Atlassian PIR, aprile 2022",
-    "Azure DevOps post-mortem, maggio 2023",
-    "GitHub Docs: rischi e mitigazioni del coding agent Copilot",
-], size=20)
-ph(s, 1).width = Inches(8.6)
+- Nel repository: docs/session/demo-runbook.md per ripetere la demo; docs/case-study.md per Atlassian PIR e post-mortem Azure DevOps. Riferimento aggiuntivo: documentazione GitHub sui rischi e le mitigazioni del coding agent.
+""", name="Grazie! Codice, demo e fonti")
+label(s, 0.6, 1.42, 12.13, 0.45, "Codice · Demo · Fonti", size=22, bold=True, align=PP_ALIGN.CENTER)
+link = label(s, 0.6, 5.5, 12.13, 0.45, "github.com/carlosacchi/wpc-2026",
+             size=20, color=RED, bold=True, align=PP_ALIGN.CENTER)
+link.text_frame.paragraphs[0].runs[0].hyperlink.address = REPO
 qr_path = HERE / "out/qr-repo.png"
 qr_path.parent.mkdir(parents=True, exist_ok=True)
 qrcode.make(REPO, border=1).save(qr_path)
-s.shapes.add_picture(str(qr_path), Inches(9.6), Inches(2.0), Inches(3.2), Inches(3.2))
+qr_size = Inches(3.35)
+s.shapes.add_picture(str(qr_path), (prs.slide_width - qr_size) // 2, Inches(1.95), qr_size, qr_size)
 
 # ---------------------------------------------------------------- Appendix: full glossary (not timed)
 GLOSSARY = sorted([
@@ -966,6 +902,11 @@ for n, page in enumerate(pages, 1):
 APPENDICE, non si presenta: è per chi scarica il deck.
 """)
     table(s, [("Termine", "Significato")] + page, (3.3, 9.1), y=1.55, row_h=0.55, size=14, head_size=15)
+
+s = new("Solo titolo", "Checklist delle protezioni", "APPENDICE: riferimento per chi scarica il deck.")
+table(s, PROTECTION_ROWS, (1.65, 5.6, 5.15), x=0.45, y=1.5, row_h=0.42, size=13, head_size=14)
+source(s, "Fonti: Microsoft Learn (Storage, Key Vault, Azure SQL, Azure Backup, deployment stacks), "
+          "HashiCorp lifecycle, azurerm features block. Verificate a novembre 2026.")
 
 TALK_END = CLOCK[0]
 

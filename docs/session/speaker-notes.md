@@ -127,6 +127,7 @@ Azure DevOps è il servizio Microsoft. Il rollout graduale c'era già, ma il rin
 - Ring 1, South Brazil: la condizione c'è. Diciassette database di produzione, circa dieci ore di disservizio.
 - Lo dico ad alta voce: il canary riduce il raggio d'azione, non verifica l'effetto. Se il ring 0 non contiene il caso critico, non ti protegge.
 - Tra le correzioni di Microsoft c'è il resource lock sui server SQL di produzione. Tenetelo a mente: nella demo il lock c'è, e un delete lanciato a mano lo fermerà Azure stesso, fuori dalla pipeline.
+- Le altre correzioni: test sull'intero ciclo di vita del job e snapshot su server separati da quelli di produzione.
 
 ## 10. Lo schema comune
 
@@ -190,6 +191,7 @@ SPUNTI FACOLTATIVI
 - La review del Code Owner serve per modificare gate e workflow; l'approvazione dell'Environment serve per applicare il workload.
 - Senza una review richiesta nelle regole del repository, una PR può essere unita senza approvazione.
 - L'agent mode usa il terminale dell'utente e quindi può ereditare le sue credenziali Azure.
+- Distingui cloud agent e agent mode in VS Code: il cloud agent può aprire una PR ma non approvarla; GitHub può chiedere un'approvazione per i workflow. In VS Code le richieste di conferma convivono con opzioni di auto-approvazione.
 
 ## 14. Azure MCP Server: contesto, non giudizio
 
@@ -357,6 +359,7 @@ Questi limiti li dico io, prima che li trovi qualcuno in sala.
 - La DenyAction protegge gli Storage che hanno il tag del progetto: chi può cambiare quel tag li fa uscire dalla policy. Il lock resta.
 - Il lab protegge il control plane, non i dati: bloccare la cancellazione dello Storage non impedisce di cancellare i blob dentro.
 - Chi amministra il repository può cambiare branch protection ed environment. Per questo policy e lock stanno in Azure: chi controlla GitHub non li controlla automaticamente.
+- Il What-If con ProviderNoRbac non verifica i permessi di scrittura. I gate del lab sono regole didattiche, non uno scanner di sicurezza completo.
 
 ## 25. Protezioni spesso spente
 
@@ -370,7 +373,7 @@ In Azure, soft delete e versioning sui blob, purge protection sul Key Vault, sof
 Non dovete ricordarla adesso: la trovate nel deck, sul repository.
 
 SPUNTI FACOLTATIVI
-La slide da fotografare. Non la leggo riga per riga: scelgo due o tre righe in base alla sala.
+Tre famiglie di protezioni. Scelgo due o tre esempi in base alla sala; la tabella completa è in appendice.
 - prevent_destroy accetta solo valori letterali: non si può accendere con una variabile solo in prod. Se il modulo è condiviso tra gli ambienti, di fatto è acceso ovunque.
 - prevent_destroy non è un controllo di sicurezza: se qualcuno, persona o agente, cancella il blocco resource o il lifecycle, Terraform distrugge senza avvisare. Per questo serve anche la review dei moduli (qui: CODEOWNERS) e, fuori da Terraform, lock e policy. Per togliere una risorsa dal codice senza distruggerla c'è il blocco removed con lifecycle { destroy = false }.
 - Nel lab prevent_destroy è sullo state e sui RG dei tenant, non sullo Storage: lì Terraform fermerebbe il piano prima del gate e nella demo non vedreste il gate.
@@ -413,6 +416,7 @@ Domande probabili, con una risposta breve:
 - «Perché non basta Azure Policy?» Perché la policy valuta la singola richiesta, non il piano: non sa che quel delete fa parte di un replace.
 - «Funziona con Azure DevOps?» Il principio sì: environment con approvazioni e controlli, service connection con workload identity federation, lo stesso gate in uno step.
 - «Quanto costa il lab?» Quasi niente: due Storage praticamente vuoti più lo state. Identità e policy non costano.
+- Nel repository: docs/session/demo-runbook.md per ripetere la demo; docs/case-study.md per Atlassian PIR e post-mortem Azure DevOps. Riferimento aggiuntivo: documentazione GitHub sui rischi e le mitigazioni del coding agent.
 
 ## 28. Glossario (1/4)
 
@@ -430,10 +434,14 @@ APPENDICE, non si presenta: è per chi scarica il deck.
 
 APPENDICE, non si presenta: è per chi scarica il deck.
 
-## 32. Backup: approvazione dell'environment
+## 32. Checklist delle protezioni
+
+APPENDICE: riferimento per chi scarica il deck.
+
+## 33. Backup: approvazione dell'environment
 
 BACKUP (nascosta). Run reale 42823102175: il revisore azureitaliadevops approva il deployment sales. Chi ha lanciato la run (carlosacchi) non può approvare: current_user_can_approve = false.
 
-## 33. Backup: canary Sales, output reali
+## 34. Backup: canary Sales, output reali
 
 BACKUP (nascosta). Run 42823102175 (canary) e 42917201757 (rings=all: Sales senza modifiche, apply saltato).

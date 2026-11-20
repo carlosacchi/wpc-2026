@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.5
+
+### Modificato
+- Deck WPC: meno testo sul palco, con icone di PowerPoint modificabili, schemi e numeri in evidenza. La checklist completa delle protezioni è in appendice. Immagini, snippet e output della demo sono invariati.
+
+### Corretto
+- Slide 27: QR centrato, link al repository cliccabile e nessuna sovrapposizione con il titolo.
+
 ## 0.5.4
 
 ### Aggiunto
