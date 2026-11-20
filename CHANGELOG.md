@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.5
+
+### Modificato
+- Deck WPC: meno testo sul palco, con icone di PowerPoint modificabili, schemi e numeri in evidenza. La checklist completa delle protezioni è in appendice. Immagini, snippet e output della demo sono invariati.
+
+### Corretto
+- Slide 27: QR centrato, link al repository cliccabile e nessuna sovrapposizione con il titolo.
+
+## 0.5.4
+
+### Aggiunto
+- Deck: slide "Protezioni spesso spente" (dopo "Limiti dichiarati"), con tabella delle impostazioni Terraform, Bicep e Azure da attivare o verificare contro cancellazioni e perdita di dati: `prevent_destroy`, `purge_soft_delete_on_destroy` del provider azurerm, backend dello state, deployment stack, soft delete di blob, Key Vault, Azure SQL e Azure Backup, lock e policy. Fonti Microsoft Learn e HashiCorp verificate a novembre 2026. Note con la risposta a «`prevent_destroy` su tutti gli ambienti o solo in prod?».
+
+### Modificato
+- `.gitignore`: restano esclusi solo state, tfvars, piani, artefatti generati, cache e ambienti locali. Template WPC, foto, loghi e deck generato (`docs/session/out/`) si versionano, per lavorare da più macchine.
+- Deck: "Rollback = roll-forward" e "Limiti dichiarati" accorciate di 30 secondi ciascuna, il Q&A di 15, per restare a 45 minuti.
+
+### Corretto
+- `build_deck.py`: due spunti facoltativi (Azure DevOps, Copilot) riallineati a `speaker-notes.md`, modificato a mano nel commit precedente; ora la build rigenera le note senza perderli.
+
+## 0.5.3
+
+### Aggiunto
+- `docs/session/demo-guida-a-z.md`: guida completa alla demo, con squash merge dopo i check obbligatori e output del canary senza codici colore ANSI.
+
 ## 0.5.0
 
 ### Aggiunto
